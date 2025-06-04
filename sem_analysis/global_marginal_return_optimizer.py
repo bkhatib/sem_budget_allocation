@@ -164,20 +164,45 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         # Business justification
         justifications = []
         for i, row in out_df.iterrows():
+            # Add confidence explanation
+            confidence_explanation = ""
+            if row['Confidence'] < 0.3:
+                confidence_explanation = (
+                    f"⚠️ Low Confidence (R² = {row['Confidence']:.2%}): The model shows weak fit to historical data. "
+                    f"This could be due to high variability in conversion rates, insufficient historical data, "
+                    f"or external factors affecting performance. Consider gathering more data or investigating "
+                    f"potential issues with this ad group's targeting or creative."
+                )
+            elif row['Confidence'] < 0.6:
+                confidence_explanation = (
+                    f"⚠️ Moderate Confidence (R² = {row['Confidence']:.2%}): The model shows reasonable fit to historical data, "
+                    f"but there's still significant variability. This could be due to seasonal effects, "
+                    f"market changes, or competition. Monitor this ad group closely and be prepared to adjust "
+                    f"budget if performance deviates from expectations."
+                )
+            else:
+                confidence_explanation = (
+                    f"✅ High Confidence (R² = {row['Confidence']:.2%}): The model shows strong fit to historical data, "
+                    f"indicating reliable predictions. The recommended budget changes are well-supported by "
+                    f"historical performance patterns."
+                )
+
             if row['Recommended_Spend'] > row['Current_Spend']:
                 reason = (
                     f"Increase spend because this AdGroup has {row['Impressions']:.0f} avg weekly impressions, "
                     f"{row['Clicks']:.0f} clicks (CTR: {row['CTR']:.2%}), and {row['Current_Conversions']:.2f} conversions (CVR: {row['CVR']:.2%}). "
                     f"Current TCPA is ${row['Current_TCPA']:.2f}, expected TCPA is ${row['Expected_TCPA']:.2f}. "
                     f"The marginal conversion per dollar is {row['Marginal_Conversion_per_Dollar']:.4f}, indicating room for profitable scaling. "
-                    f"The model does not show strong saturation at current spend, so additional budget is likely to yield incremental conversions."
+                    f"The model does not show strong saturation at current spend, so additional budget is likely to yield incremental conversions.\n\n"
+                    f"{confidence_explanation}"
                 )
             else:
                 reason = (
                     f"Decrease spend because this AdGroup, despite {row['Impressions']:.0f} avg weekly impressions and {row['Clicks']:.0f} clicks (CTR: {row['CTR']:.2%}), "
                     f"shows signs of saturation or inefficiency. Current TCPA is ${row['Current_TCPA']:.2f}, expected TCPA is ${row['Expected_TCPA']:.2f}. "
                     f"The marginal conversion per dollar is {row['Marginal_Conversion_per_Dollar']:.4f}, which is relatively low, indicating diminishing returns. "
-                    f"The model suggests that reallocating budget elsewhere will yield better overall results."
+                    f"The model suggests that reallocating budget elsewhere will yield better overall results.\n\n"
+                    f"{confidence_explanation}"
                 )
             justifications.append(reason)
         
