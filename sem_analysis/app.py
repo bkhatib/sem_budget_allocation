@@ -8,6 +8,7 @@ import os
 import base64
 from io import BytesIO
 import logging
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -99,10 +100,22 @@ try:
     
     # Run the selected optimization model
     if model_choice == "Diminishing Returns Model":
-        results_df = global_marginal_return_optimizer(df, total_budget)
+        results_df, adgroup_rmses = global_marginal_return_optimizer(df, total_budget)
         skipped_adgroups = []
     else:
-        results_df, skipped_adgroups = global_marginal_return_optimizer_multi_variant(df, total_budget)
+        results_df, skipped_adgroups, adgroup_rmses = global_marginal_return_optimizer_multi_variant(df, total_budget)
+    
+    # Calculate overall RMSE (weighted by number of data points per ad group)
+    if adgroup_rmses:
+        total_n = sum(r['n'] for r in adgroup_rmses)
+        overall_rmse = np.sqrt(
+            sum((r['RMSE']**2) * r['n'] for r in adgroup_rmses) / total_n
+        ) if total_n > 0 else np.nan
+    else:
+        overall_rmse = np.nan
+    
+    # Show overall RMSE at the top
+    st.metric("Overall Model RMSE (conversions)", f"{overall_rmse:.2f}" if not np.isnan(overall_rmse) else "N/A")
     
     # Show skipped ad groups section always
     with st.expander("See Skipped Ad Groups", expanded=False):
@@ -249,7 +262,8 @@ try:
                     'Current_TCPA': '${:,.2f}',
                     'Expected_TCPA': '${:,.2f}',
                     'Marginal_Conversion_per_Dollar': '{:.4f}',
-                    'Confidence': '{:.2%}'
+                    'Confidence': '{:.2%}',
+                    'RMSE': '{:.2f}'
                 }),
                 use_container_width=True
             )

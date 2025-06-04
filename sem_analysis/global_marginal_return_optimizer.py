@@ -5,6 +5,7 @@ import logging
 import matplotlib.pyplot as plt
 import os
 from scipy.optimize import minimize
+from sklearn.metrics import mean_squared_error
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,7 +39,8 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
     logger.info(f"Input data shape: {df.shape}")
     
     adgroup_params = []
-    adgroup_indices = []  # For explicit indexing
+    adgroup_indices = []
+    adgroup_rmses = []
     
     # Group by AdGroup and process each group
     for idx, (adgroup, group_df) in enumerate(df.groupby('AdGroup')):
@@ -67,6 +69,14 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         logger.info(f"  CTR: {ctr:.2%}")
         logger.info(f"  CVR: {cvr:.2%}")
         
+        # Calculate per-adgroup RMSE
+        X = np.log(group_df['Spend']).values.reshape(-1, 1)
+        X = sm.add_constant(X)
+        y_true = group_df['Conversions'].values
+        y_pred = a + b * np.log(group_df['Spend'])
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        adgroup_rmses.append({'AdGroup': adgroup, 'RMSE': rmse, 'n': len(y_true)})
+        
         adgroup_params.append({
             'AdGroup_Index': idx,
             'AdGroup': adgroup,
@@ -79,7 +89,8 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
             'Impressions': impressions,
             'Clicks': clicks,
             'CTR': ctr,
-            'CVR': cvr
+            'CVR': cvr,
+            'RMSE': rmse,
         })
         adgroup_indices.append(idx)
     
@@ -88,7 +99,7 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
     
     if n == 0:
         logger.error("No valid adgroups for optimization.")
-        return pd.DataFrame()
+        return pd.DataFrame(), adgroup_rmses
         
     logger.info(f"\nOptimization parameters:")
     logger.info(f"Number of valid adgroups: {n}")
@@ -146,7 +157,7 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
             )
             if not result.success:
                 logger.error(f"Optimization failed again: {result.message}")
-                return pd.DataFrame()
+                return pd.DataFrame(), adgroup_rmses
             
         logger.info("Optimization successful!")
         spends = result.x
@@ -160,6 +171,7 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         out_df['Expected_TCPA'] = expected_tcpa
         out_df['Marginal_Conversion_per_Dollar'] = marginal_returns
         out_df['Confidence'] = params_df['R2']
+        out_df['RMSE'] = params_df['RMSE']
         
         # Add confidence level column
         def get_confidence_level(r2):
@@ -222,14 +234,14 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         # Reorder columns for clarity
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','Business_Justification']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','Business_Justification','RMSE']]
         
         logger.info("Optimization complete. Returning results.")
-        return out_df
+        return out_df, adgroup_rmses
         
     except Exception as e:
         logger.error(f"Error during optimization: {str(e)}")
-        return pd.DataFrame()
+        return pd.DataFrame(), adgroup_rmses
 
 def plot_response_curves_conversions(df, results_df, output_dir='response_curves_conversions'):
     if not os.path.exists(output_dir):
@@ -268,7 +280,7 @@ def main():
     df = pd.read_csv(DATA_PATH)
     df['week_start'] = pd.to_datetime(df['week_start'])
     logger.info(f"Loaded {len(df)} rows.")
-    results_df = global_marginal_return_optimizer(df, WEEKLY_BUDGET)
+    results_df, adgroup_rmses = global_marginal_return_optimizer(df, WEEKLY_BUDGET)
     if not results_df.empty:
         results_df.to_csv('global_marginal_return_optimization.csv', index=False)
         logger.info("Saved results to global_marginal_return_optimization.csv")

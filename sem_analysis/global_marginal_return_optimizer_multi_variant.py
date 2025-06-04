@@ -3,6 +3,7 @@ import numpy as np
 import statsmodels.api as sm
 import logging
 from scipy.optimize import minimize
+from sklearn.metrics import mean_squared_error
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,6 +42,7 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
     logger.info(f"Input data shape: {df.shape}")
     adgroup_params = []
     adgroup_indices = []
+    adgroup_rmses = []
     skipped_adgroups = []
     for idx, (adgroup, group_df) in enumerate(df.groupby('AdGroup')):
         logger.info(f"\nProcessing AdGroup {idx}: {adgroup}")
@@ -53,6 +55,17 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
                 'Reason': 'Insufficient or non-positive model fit (need more data or better data quality)'
             })
             continue
+        # Calculate per-adgroup RMSE
+        X = pd.DataFrame({
+            'log_Spend': np.log(group_df['Spend']),
+            'CTR': group_df['Clicks'] / group_df['Impressions'],
+            'CVR': group_df['Conversions'] / group_df['Clicks']
+        })
+        X = sm.add_constant(X)
+        y_true = group_df['Conversions'].values
+        y_pred = a + b * X['log_Spend'] + c * X['CTR'] + d * X['CVR']
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        adgroup_rmses.append({'AdGroup': adgroup, 'RMSE': rmse, 'n': len(y_true)})
         current_spend = group_df['Spend'].mean()
         current_conversions = group_df['Conversions'].mean()
         current_tcpa = current_spend / current_conversions if current_conversions > 0 else np.nan
@@ -74,14 +87,15 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
             'Impressions': impressions,
             'Clicks': clicks,
             'CTR': ctr,
-            'CVR': cvr
+            'CVR': cvr,
+            'RMSE': rmse,
         })
         adgroup_indices.append(idx)
     params_df = pd.DataFrame(adgroup_params)
     n = len(params_df)
     if n == 0:
         logger.error("No valid adgroups for optimization.")
-        return pd.DataFrame(), skipped_adgroups
+        return pd.DataFrame(), skipped_adgroups, adgroup_rmses
     # Initial guess: proportional to current spend
     current_spends = params_df['Current_Spend'].values
     total_current_spend = np.sum(current_spends)
@@ -116,7 +130,7 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
         )
         if not result.success:
             logger.error(f"Optimization failed: {result.message}")
-            return pd.DataFrame(), skipped_adgroups
+            return pd.DataFrame(), skipped_adgroups, adgroup_rmses
         spends = result.x
         conversions = (
             params_df['a'].values +
@@ -159,11 +173,12 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
                 )
             justifications.append(reason)
         out_df['Business_Justification'] = justifications
+        out_df['RMSE'] = params_df['RMSE']
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification','RMSE']]
         logger.info("Optimization complete. Returning results.")
-        return out_df, skipped_adgroups
+        return out_df, skipped_adgroups, adgroup_rmses
     except Exception as e:
         logger.error(f"Error during optimization: {str(e)}")
-        return pd.DataFrame(), skipped_adgroups
+        return pd.DataFrame(), skipped_adgroups, adgroup_rmses
