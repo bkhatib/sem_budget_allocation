@@ -104,12 +104,13 @@ try:
     else:
         results_df, skipped_adgroups = global_marginal_return_optimizer_multi_variant(df, total_budget)
     
-    # Show skipped ad groups if any
-    if skipped_adgroups:
-        st.warning(f"{len(skipped_adgroups)} ad group(s) were skipped due to insufficient or poor model fit.")
-        st.expander("See Skipped Ad Groups").write(
-            pd.DataFrame(skipped_adgroups)
-        )
+    # Show skipped ad groups section always
+    with st.expander("See Skipped Ad Groups", expanded=False):
+        if skipped_adgroups:
+            st.warning(f"{len(skipped_adgroups)} ad group(s) were skipped due to insufficient or poor model fit.")
+            st.write(pd.DataFrame(skipped_adgroups))
+        else:
+            st.success("All ad groups were successfully modeled.")
     
     if df is not None:
         # Display data summary
