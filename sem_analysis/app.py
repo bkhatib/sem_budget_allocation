@@ -46,6 +46,15 @@ Use the controls below to adjust parameters and view optimization results.
 
 # Sidebar controls
 st.sidebar.header("Optimization Parameters")
+
+# File uploader
+st.sidebar.subheader("Upload SEM Data CSV")
+uploaded_file = st.sidebar.file_uploader(
+    "Choose a CSV file",
+    type=["csv"],
+    help="Upload a CSV file with the same format as the default. If not provided, the default file will be used."
+)
+
 total_budget = st.sidebar.number_input(
     "Total Weekly Budget ($)",
     min_value=1000,
@@ -56,11 +65,14 @@ total_budget = st.sidebar.number_input(
 
 # Load and process data
 @st.cache_data
-def load_data():
+def load_data(uploaded_file=None):
     try:
-        df = pd.read_csv('sem_analysis/SEM_DATA_TOP100.csv')
+        if uploaded_file is not None:
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_csv('sem_analysis/SEM_DATA_TOP100.csv')
         df['week_start'] = pd.to_datetime(df['week_start'])
-        st.sidebar.success(f"Successfully loaded {len(df)} rows of data")
+        st.sidebar.success(f"Loaded {len(df)} rows of data")
         st.sidebar.info(f"Number of unique ad groups: {df['AdGroup'].nunique()}")
         st.sidebar.info(f"Date range: {df['week_start'].min()} to {df['week_start'].max()}")
         return df
@@ -69,7 +81,7 @@ def load_data():
         return None
 
 try:
-    df = load_data()
+    df = load_data(uploaded_file)
     
     if df is not None:
         # Display data summary
