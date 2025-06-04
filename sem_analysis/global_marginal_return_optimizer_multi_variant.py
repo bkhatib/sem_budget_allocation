@@ -130,9 +130,33 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
         out_df['Confidence_Level'] = out_df['Confidence'].apply(
             lambda r2: "Low Confidence" if r2 < 0.3 else ("Moderate Confidence" if r2 < 0.6 else "High Confidence")
         )
+        # Add business justification
+        justifications = []
+        for i, row in out_df.iterrows():
+            if row['Recommended_Spend'] > row['Current_Spend']:
+                reason = (
+                    f"Increase spend because this AdGroup has {row['Impressions']:.0f} avg impressions, "
+                    f"{row['Clicks']:.0f} clicks (CTR: {row['CTR']:.2%}), and {row['Current_Conversions']:.2f} conversions (CVR: {row['CVR']:.2%}). "
+                    f"Current TCPA is ${row['Current_TCPA']:.2f}, expected TCPA is ${row['Expected_TCPA']:.2f}. "
+                    f"The marginal conversion per dollar is {row['Marginal_Conversion_per_Dollar']:.4f}. "
+                    f"The multivariate model (using Spend, CTR, CVR) suggests that additional budget is likely to yield incremental conversions. "
+                    f"Model coefficients: log(Spend)={row['b']:.3f}, CTR={row['c']:.3f}, CVR={row['d']:.3f}. "
+                    f"Confidence: {row['Confidence_Level']} (R²={row['Confidence']:.2%})."
+                )
+            else:
+                reason = (
+                    f"Decrease spend because this AdGroup, despite {row['Impressions']:.0f} avg impressions and {row['Clicks']:.0f} clicks (CTR: {row['CTR']:.2%}), "
+                    f"shows signs of saturation or inefficiency. Current TCPA is ${row['Current_TCPA']:.2f}, expected TCPA is ${row['Expected_TCPA']:.2f}. "
+                    f"The marginal conversion per dollar is {row['Marginal_Conversion_per_Dollar']:.4f}. "
+                    f"The multivariate model (using Spend, CTR, CVR) suggests reallocating budget elsewhere will yield better overall results. "
+                    f"Model coefficients: log(Spend)={row['b']:.3f}, CTR={row['c']:.3f}, CVR={row['d']:.3f}. "
+                    f"Confidence: {row['Confidence_Level']} (R²={row['Confidence']:.2%})."
+                )
+            justifications.append(reason)
+        out_df['Business_Justification'] = justifications
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification']]
         logger.info("Optimization complete. Returning results.")
         return out_df
     except Exception as e:
