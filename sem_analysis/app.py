@@ -52,8 +52,8 @@ st.sidebar.header("Optimization Parameters")
 model_choice = st.sidebar.radio(
     "Select Optimization Model",
     (
-        "Log-linear (Spend only)",
-        "Multivariate (Spend, CTR, CVR)"
+        "Diminishing Returns Model",
+        "Multi-Factor Optimization Model"
     ),
     help="Choose which model to use for budget optimization."
 )
@@ -98,7 +98,7 @@ try:
     st.markdown(f"### Model in Use: **{model_choice}**")
     
     # Run the selected optimization model
-    if model_choice == "Log-linear (Spend only)":
+    if model_choice == "Diminishing Returns Model":
         results_df = global_marginal_return_optimizer(df, total_budget)
         skipped_adgroups = []
     else:
