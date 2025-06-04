@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from global_marginal_return_optimizer import global_marginal_return_optimizer, plot_response_curves_conversions
+from global_marginal_return_optimizer_multi_variant import global_marginal_return_optimizer_multi_variant
 import os
 import base64
 from io import BytesIO
@@ -47,6 +48,16 @@ Use the controls below to adjust parameters and view optimization results.
 # Sidebar controls
 st.sidebar.header("Optimization Parameters")
 
+# Model selection
+model_choice = st.sidebar.radio(
+    "Select Optimization Model",
+    (
+        "Log-linear (Spend only)",
+        "Multivariate (Spend, CTR, CVR)"
+    ),
+    help="Choose which model to use for budget optimization."
+)
+
 # File uploader
 st.sidebar.subheader("Upload SEM Data CSV")
 uploaded_file = st.sidebar.file_uploader(
@@ -83,6 +94,15 @@ def load_data(uploaded_file=None):
 try:
     df = load_data(uploaded_file)
     
+    # Show which model is active
+    st.markdown(f"### Model in Use: **{model_choice}**")
+    
+    # Run the selected optimization model
+    if model_choice == "Log-linear (Spend only)":
+        results_df = global_marginal_return_optimizer(df, total_budget)
+    else:
+        results_df = global_marginal_return_optimizer_multi_variant(df, total_budget)
+    
     if df is not None:
         # Display data summary
         st.sidebar.subheader("Data Summary")
@@ -92,7 +112,6 @@ try:
         
         # Run optimization
         st.info("Running optimization...")
-        results_df = global_marginal_return_optimizer(df, total_budget)
         
         if not results_df.empty:
             # Summary metrics
