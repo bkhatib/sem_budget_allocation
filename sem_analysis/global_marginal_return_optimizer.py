@@ -74,7 +74,11 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         X = sm.add_constant(X)
         y_true = group_df['Conversions'].values
         y_pred = a + b * np.log(group_df['Spend'])
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        mask = np.isfinite(y_true) & np.isfinite(y_pred)
+        if np.sum(mask) > 0:
+            rmse = np.sqrt(mean_squared_error(y_true[mask], y_pred[mask]))
+        else:
+            rmse = np.nan
         adgroup_rmses.append({'AdGroup': adgroup, 'RMSE': rmse, 'n': len(y_true)})
         
         adgroup_params.append({
