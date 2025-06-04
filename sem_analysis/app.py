@@ -178,14 +178,21 @@ try:
                 for level, count in confidence_counts.items():
                     st.write(f"- {level}: {count} ad groups")
             
-                # Calculate spend distribution by confidence level
+                # Calculate spend distribution by confidence level (current)
                 spend_by_confidence = results_df.groupby('Confidence_Level')['Current_Spend'].sum()
                 total_spend = spend_by_confidence.sum()
-                
                 st.write("\nCurrent Spend Distribution by Confidence:")
                 for level, spend in spend_by_confidence.items():
                     percentage = (spend / total_spend) * 100
                     st.write(f"- {level}: ${spend:,.2f} ({percentage:.1f}% of total spend)")
+                
+                # Calculate recommended spend distribution by confidence level
+                rec_spend_by_confidence = results_df.groupby('Confidence_Level')['Recommended_Spend'].sum()
+                total_rec_spend = rec_spend_by_confidence.sum()
+                st.write("\nRecommended Spend Distribution by Confidence:")
+                for level, spend in rec_spend_by_confidence.items():
+                    percentage = (spend / total_rec_spend) * 100 if total_rec_spend > 0 else 0
+                    st.write(f"- {level}: ${spend:,.2f} ({percentage:.1f}% of recommended budget)")
 
             with col2:
                 # Calculate average confidence by level
