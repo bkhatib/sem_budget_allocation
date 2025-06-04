@@ -4,4 +4,5 @@ statsmodels>=0.13.0
 matplotlib>=3.5.0
 scipy>=1.7.0
 streamlit>=1.22.0
-plotly>=5.13.0 
+plotly>=5.13.0
+scikit-learn>=1.0.0 
