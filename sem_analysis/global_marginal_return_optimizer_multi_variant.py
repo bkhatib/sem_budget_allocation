@@ -41,12 +41,17 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
     logger.info(f"Input data shape: {df.shape}")
     adgroup_params = []
     adgroup_indices = []
+    skipped_adgroups = []
     for idx, (adgroup, group_df) in enumerate(df.groupby('AdGroup')):
         logger.info(f"\nProcessing AdGroup {idx}: {adgroup}")
         logger.info(f"Group data shape: {group_df.shape}")
         model, a, b, c, d, r2 = fit_multivariate_model(group_df)
         if np.isnan(a) or np.isnan(b) or np.isnan(c) or np.isnan(d) or b <= 0:
             logger.warning(f"Skipping {adgroup} due to insufficient or non-positive model fit.")
+            skipped_adgroups.append({
+                'AdGroup': adgroup,
+                'Reason': 'Insufficient or non-positive model fit (need more data or better data quality)'
+            })
             continue
         current_spend = group_df['Spend'].mean()
         current_conversions = group_df['Conversions'].mean()
@@ -76,7 +81,7 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
     n = len(params_df)
     if n == 0:
         logger.error("No valid adgroups for optimization.")
-        return pd.DataFrame()
+        return pd.DataFrame(), skipped_adgroups
     # Initial guess: proportional to current spend
     current_spends = params_df['Current_Spend'].values
     total_current_spend = np.sum(current_spends)
@@ -111,7 +116,7 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
         )
         if not result.success:
             logger.error(f"Optimization failed: {result.message}")
-            return pd.DataFrame()
+            return pd.DataFrame(), skipped_adgroups
         spends = result.x
         conversions = (
             params_df['a'].values +
@@ -158,7 +163,7 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
                          'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification']]
         logger.info("Optimization complete. Returning results.")
-        return out_df
+        return out_df, skipped_adgroups
     except Exception as e:
         logger.error(f"Error during optimization: {str(e)}")
-        return pd.DataFrame()
+        return pd.DataFrame(), skipped_adgroups

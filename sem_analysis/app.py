@@ -100,8 +100,16 @@ try:
     # Run the selected optimization model
     if model_choice == "Log-linear (Spend only)":
         results_df = global_marginal_return_optimizer(df, total_budget)
+        skipped_adgroups = []
     else:
-        results_df = global_marginal_return_optimizer_multi_variant(df, total_budget)
+        results_df, skipped_adgroups = global_marginal_return_optimizer_multi_variant(df, total_budget)
+    
+    # Show skipped ad groups if any
+    if skipped_adgroups:
+        st.warning(f"{len(skipped_adgroups)} ad group(s) were skipped due to insufficient or poor model fit.")
+        st.expander("See Skipped Ad Groups").write(
+            pd.DataFrame(skipped_adgroups)
+        )
     
     if df is not None:
         # Display data summary
