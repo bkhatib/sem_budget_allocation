@@ -6,6 +6,11 @@ from global_marginal_return_optimizer import global_marginal_return_optimizer, p
 import os
 import base64
 from io import BytesIO
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Set page config
 st.set_page_config(
@@ -52,148 +57,208 @@ total_budget = st.sidebar.number_input(
 # Load and process data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('sem_analysis/SEM_DATA_TOP100.csv')
-    df['week_start'] = pd.to_datetime(df['week_start'])
-    return df
+    try:
+        df = pd.read_csv('sem_analysis/SEM_DATA_TOP100.csv')
+        df['week_start'] = pd.to_datetime(df['week_start'])
+        st.sidebar.success(f"Successfully loaded {len(df)} rows of data")
+        st.sidebar.info(f"Number of unique ad groups: {df['AdGroup'].nunique()}")
+        st.sidebar.info(f"Date range: {df['week_start'].min()} to {df['week_start'].max()}")
+        return df
+    except Exception as e:
+        st.sidebar.error(f"Error loading data: {str(e)}")
+        return None
 
 try:
     df = load_data()
     
-    # Run optimization
-    results_df = global_marginal_return_optimizer(df, total_budget)
-    
-    if not results_df.empty:
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+    if df is not None:
+        # Display data summary
+        st.sidebar.subheader("Data Summary")
+        st.sidebar.write(f"Total Spend: ${df['Spend'].sum():,.2f}")
+        st.sidebar.write(f"Total Conversions: {df['Conversions'].sum():,.0f}")
+        st.sidebar.write(f"Average TCPA: ${(df['Spend'].sum() / df['Conversions'].sum()):,.2f}")
         
-        with col1:
-            st.metric(
-                "Total Current Spend",
-                f"${results_df['Current_Spend'].sum():,.0f}"
+        # Run optimization
+        st.info("Running optimization...")
+        results_df = global_marginal_return_optimizer(df, total_budget)
+        
+        if not results_df.empty:
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Total Current Spend",
+                    f"${results_df['Current_Spend'].sum():,.0f}"
+                )
+            
+            with col2:
+                st.metric(
+                    "Total Recommended Spend",
+                    f"${results_df['Recommended_Spend'].sum():,.0f}"
+                )
+            
+            with col3:
+                st.metric(
+                    "Expected Conversion Increase",
+                    f"{(results_df['Expected_Conversions'].sum() - results_df['Current_Conversions'].sum()):,.1f}"
+                )
+            
+            with col4:
+                st.metric(
+                    "Average TCPA Improvement",
+                    f"${(results_df['Current_TCPA'].mean() - results_df['Expected_TCPA'].mean()):,.2f}"
+                )
+
+            # Budget Allocation Chart
+            st.subheader("Budget Allocation Comparison")
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                name='Current Spend',
+                x=results_df['AdGroup'],
+                y=results_df['Current_Spend'],
+                marker_color='lightblue'
+            ))
+            fig.add_trace(go.Bar(
+                name='Recommended Spend',
+                x=results_df['AdGroup'],
+                y=results_df['Recommended_Spend'],
+                marker_color='darkblue'
+            ))
+            fig.update_layout(
+                barmode='group',
+                xaxis_title="Ad Group",
+                yaxis_title="Spend ($)",
+                height=500
             )
-        
-        with col2:
-            st.metric(
-                "Total Recommended Spend",
-                f"${results_df['Recommended_Spend'].sum():,.0f}"
+            st.plotly_chart(fig, use_container_width=True)
+
+            # TCPA Comparison
+            st.subheader("TCPA Comparison")
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                name='Current TCPA',
+                x=results_df['AdGroup'],
+                y=results_df['Current_TCPA'],
+                marker_color='lightgreen'
+            ))
+            fig.add_trace(go.Bar(
+                name='Expected TCPA',
+                x=results_df['AdGroup'],
+                y=results_df['Expected_TCPA'],
+                marker_color='darkgreen'
+            ))
+            fig.update_layout(
+                barmode='group',
+                xaxis_title="Ad Group",
+                yaxis_title="TCPA ($)",
+                height=500
             )
-        
-        with col3:
-            st.metric(
-                "Expected Conversion Increase",
-                f"{(results_df['Expected_Conversions'].sum() - results_df['Current_Conversions'].sum()):,.1f}"
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Detailed Results Table
+            st.subheader("Detailed Optimization Results")
+            
+            # Add confidence level filter
+            confidence_levels = results_df['Confidence_Level'].unique()
+            selected_confidence = st.multiselect(
+                "Filter by Confidence Level",
+                options=confidence_levels,
+                default=confidence_levels
             )
-        
-        with col4:
-            st.metric(
-                "Average TCPA Improvement",
-                f"${(results_df['Current_TCPA'].mean() - results_df['Expected_TCPA'].mean()):,.2f}"
+            
+            # Filter the dataframe based on selected confidence levels
+            filtered_df = results_df[results_df['Confidence_Level'].isin(selected_confidence)]
+            
+            # Display confidence level distribution
+            col1, col2 = st.columns(2)
+            with col1:
+                confidence_counts = results_df['Confidence_Level'].value_counts()
+                st.write("Confidence Level Distribution:")
+                for level, count in confidence_counts.items():
+                    st.write(f"- {level}: {count} ad groups")
+            
+            with col2:
+                # Calculate average confidence by level
+                avg_confidence = results_df.groupby('Confidence_Level')['Confidence'].mean()
+                st.write("Average R² by Confidence Level:")
+                for level, avg in avg_confidence.items():
+                    st.write(f"- {level}: {avg:.2%}")
+            
+            # Display the filtered dataframe
+            st.dataframe(
+                filtered_df.style.format({
+                    'Current_Spend': '${:,.2f}',
+                    'Recommended_Spend': '${:,.2f}',
+                    'Current_TCPA': '${:,.2f}',
+                    'Expected_TCPA': '${:,.2f}',
+                    'Marginal_Conversion_per_Dollar': '{:.4f}',
+                    'Confidence': '{:.2%}'
+                }),
+                use_container_width=True
             )
 
-        # Budget Allocation Chart
-        st.subheader("Budget Allocation Comparison")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name='Current Spend',
-            x=results_df['AdGroup'],
-            y=results_df['Current_Spend'],
-            marker_color='lightblue'
-        ))
-        fig.add_trace(go.Bar(
-            name='Recommended Spend',
-            x=results_df['AdGroup'],
-            y=results_df['Recommended_Spend'],
-            marker_color='darkblue'
-        ))
-        fig.update_layout(
-            barmode='group',
-            xaxis_title="Ad Group",
-            yaxis_title="Spend ($)",
-            height=500
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            # Business Justifications
+            st.subheader("Business Justifications")
+            for _, row in filtered_df.iterrows():
+                with st.expander(f"📊 {row['AdGroup']} ({row['Confidence_Level']})"):
+                    st.markdown(row['Business_Justification'])
 
-        # TCPA Comparison
-        st.subheader("TCPA Comparison")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name='Current TCPA',
-            x=results_df['AdGroup'],
-            y=results_df['Current_TCPA'],
-            marker_color='lightgreen'
-        ))
-        fig.add_trace(go.Bar(
-            name='Expected TCPA',
-            x=results_df['AdGroup'],
-            y=results_df['Expected_TCPA'],
-            marker_color='darkgreen'
-        ))
-        fig.update_layout(
-            barmode='group',
-            xaxis_title="Ad Group",
-            yaxis_title="TCPA ($)",
-            height=500
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            # Download buttons
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("Download Results")
+            
+            # CSV Download
+            csv = results_df.to_csv(index=False)
+            st.sidebar.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name="optimization_results.csv",
+                mime="text/csv"
+            )
+            
+            # Generate and save response curves
+            plot_response_curves_conversions(df, results_df)
+            
+            # Create zip file of response curves
+            import zipfile
+            import io
+            
+            memory_file = io.BytesIO()
+            with zipfile.ZipFile(memory_file, 'w') as zf:
+                for filename in os.listdir('response_curves_conversions'):
+                    if filename.endswith('.png'):
+                        zf.write(
+                            os.path.join('response_curves_conversions', filename),
+                            filename
+                        )
+            
+            st.sidebar.download_button(
+                label="Download Response Curves",
+                data=memory_file.getvalue(),
+                file_name="response_curves.zip",
+                mime="application/zip"
+            )
 
-        # Detailed Results Table
-        st.subheader("Detailed Optimization Results")
-        st.dataframe(
-            results_df.style.format({
-                'Current_Spend': '${:,.2f}',
-                'Recommended_Spend': '${:,.2f}',
-                'Current_TCPA': '${:,.2f}',
-                'Expected_TCPA': '${:,.2f}',
-                'Marginal_Conversion_per_Dollar': '{:.4f}',
-                'Confidence': '{:.2%}'
-            }),
-            use_container_width=True
-        )
-
-        # Business Justifications
-        st.subheader("Business Justifications")
-        for _, row in results_df.iterrows():
-            with st.expander(f"📊 {row['AdGroup']}"):
-                st.markdown(row['Business_Justification'])
-
-        # Download buttons
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Download Results")
-        
-        # CSV Download
-        csv = results_df.to_csv(index=False)
-        st.sidebar.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name="optimization_results.csv",
-            mime="text/csv"
-        )
-        
-        # Generate and save response curves
-        plot_response_curves_conversions(df, results_df)
-        
-        # Create zip file of response curves
-        import zipfile
-        import io
-        
-        memory_file = io.BytesIO()
-        with zipfile.ZipFile(memory_file, 'w') as zf:
-            for filename in os.listdir('response_curves_conversions'):
-                if filename.endswith('.png'):
-                    zf.write(
-                        os.path.join('response_curves_conversions', filename),
-                        filename
-                    )
-        
-        st.sidebar.download_button(
-            label="Download Response Curves",
-            data=memory_file.getvalue(),
-            file_name="response_curves.zip",
-            mime="application/zip"
-        )
+        else:
+            st.error("No valid optimization results. Please check your data and parameters.")
+            # Add debugging information
+            st.subheader("Debugging Information")
+            st.write("Data Summary:")
+            st.write(f"Number of rows: {len(df)}")
+            st.write(f"Number of ad groups: {df['AdGroup'].nunique()}")
+            st.write(f"Date range: {df['week_start'].min()} to {df['week_start'].max()}")
+            st.write(f"Total spend: ${df['Spend'].sum():,.2f}")
+            st.write(f"Total conversions: {df['Conversions'].sum():,.0f}")
+            
+            # Show sample of data
+            st.write("Sample of data:")
+            st.dataframe(df.head())
 
     else:
-        st.error("No valid optimization results. Please check your data and parameters.")
+        st.error("Failed to load data. Please check if the data file exists and is properly formatted.")
 
 except Exception as e:
-    st.error(f"An error occurred: {str(e)}") 
+    st.error(f"An error occurred: {str(e)}")
+    import traceback
+    st.code(traceback.format_exc()) 

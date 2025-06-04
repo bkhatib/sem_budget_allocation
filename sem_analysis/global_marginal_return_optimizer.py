@@ -161,6 +161,17 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         out_df['Marginal_Conversion_per_Dollar'] = marginal_returns
         out_df['Confidence'] = params_df['R2']
         
+        # Add confidence level column
+        def get_confidence_level(r2):
+            if r2 < 0.3:
+                return "Low Confidence"
+            elif r2 < 0.6:
+                return "Moderate Confidence"
+            else:
+                return "High Confidence"
+        
+        out_df['Confidence_Level'] = out_df['Confidence'].apply(get_confidence_level)
+        
         # Business justification
         justifications = []
         for i, row in out_df.iterrows():
@@ -211,7 +222,7 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         # Reorder columns for clarity
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Business_Justification']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','Business_Justification']]
         
         logger.info("Optimization complete. Returning results.")
         return out_df
