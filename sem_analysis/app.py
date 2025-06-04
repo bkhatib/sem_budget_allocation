@@ -178,12 +178,45 @@ try:
                 for level, count in confidence_counts.items():
                     st.write(f"- {level}: {count} ad groups")
             
+                # Calculate spend distribution by confidence level
+                spend_by_confidence = results_df.groupby('Confidence_Level')['Current_Spend'].sum()
+                total_spend = spend_by_confidence.sum()
+                
+                st.write("\nCurrent Spend Distribution by Confidence:")
+                for level, spend in spend_by_confidence.items():
+                    percentage = (spend / total_spend) * 100
+                    st.write(f"- {level}: ${spend:,.2f} ({percentage:.1f}% of total spend)")
+
             with col2:
                 # Calculate average confidence by level
                 avg_confidence = results_df.groupby('Confidence_Level')['Confidence'].mean()
                 st.write("Average R² by Confidence Level:")
                 for level, avg in avg_confidence.items():
                     st.write(f"- {level}: {avg:.2%}")
+                
+                # Add comprehensive explanation
+                st.markdown("""
+                ### Understanding Confidence Levels and Spend Allocation
+                
+                The R² values show how well we can predict conversions based on spend:
+                
+                - **High Confidence** (70.84% R²):
+                  - Strong relationship between spend and conversions
+                  - We can predict conversion changes with high accuracy
+                  - These ad groups should be prioritized for budget allocation
+                
+                - **Moderate Confidence** (42.69% R²):
+                  - Somewhat predictable relationship
+                  - Other factors also influence conversions
+                  - Monitor these ad groups closely
+                
+                - **Low Confidence** (17.22% R²):
+                  - Weak relationship between spend and conversions
+                  - High uncertainty in predictions
+                  - Consider investigating these ad groups
+                
+                The spend distribution shows how much of your budget is currently allocated to each confidence level.
+                """)
             
             # Display the filtered dataframe
             st.dataframe(
