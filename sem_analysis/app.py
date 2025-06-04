@@ -116,6 +116,16 @@ try:
     
     # Show overall RMSE at the top
     st.metric("Overall Model RMSE (conversions)", f"{overall_rmse:.2f}" if not np.isnan(overall_rmse) else "N/A")
+    st.info("""
+    **RMSE (Root Mean Squared Error) Guide:**
+    - **Excellent (0–1):** Very high accuracy
+    - **Good (1–3):** Reliable for most decisions
+    - **Moderate (3–6):** Use with some caution
+    - **Low (6–10):** Review recommendations carefully
+    - **Poor (>10):** Use only as a rough guide
+    
+    RMSE tells you, on average, how far off the model's predictions are from actual conversions. Lower is better.
+    """)
     
     # Show skipped ad groups section always
     with st.expander("See Skipped Ad Groups", expanded=False):

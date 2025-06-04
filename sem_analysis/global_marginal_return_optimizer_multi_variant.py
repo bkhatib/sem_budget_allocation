@@ -93,6 +93,13 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
             'CTR': ctr,
             'CVR': cvr,
             'RMSE': rmse,
+            'RMSE_Category': (
+                'Excellent' if rmse <= 1 else
+                'Good' if rmse <= 3 else
+                'Moderate' if rmse <= 6 else
+                'Low' if rmse <= 10 else
+                'Poor'
+            ),
         })
         adgroup_indices.append(idx)
     params_df = pd.DataFrame(adgroup_params)
@@ -178,9 +185,10 @@ def global_marginal_return_optimizer_multi_variant(df, total_budget=WEEKLY_BUDGE
             justifications.append(reason)
         out_df['Business_Justification'] = justifications
         out_df['RMSE'] = params_df['RMSE']
+        out_df['RMSE_Category'] = params_df['RMSE_Category']
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification','RMSE']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','CTR','CVR','Business_Justification','RMSE','RMSE_Category']]
         logger.info("Optimization complete. Returning results.")
         return out_df, skipped_adgroups, adgroup_rmses
     except Exception as e:
