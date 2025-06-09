@@ -24,6 +24,18 @@ class GlobalMarginalReturnOptimizerRMSE:
         
     def engineer_features(self, df):
         """Engineer additional features to improve model performance"""
+        # Create a copy to avoid modifying the original dataframe
+        df = df.copy()
+        
+        # Convert timestamp to numeric features if it exists
+        if 'week_start' in df.columns:
+            df['month'] = df['week_start'].dt.month
+            df['quarter'] = df['week_start'].dt.quarter
+            df['day_of_week'] = df['week_start'].dt.dayofweek
+            df['week_of_year'] = df['week_start'].dt.isocalendar().week
+            # Drop the original timestamp column
+            df = df.drop('week_start', axis=1)
+        
         # Basic spend features
         df['spend_squared'] = df[self.spend_col] ** 2
         df['spend_cubed'] = df[self.spend_col] ** 3
@@ -50,12 +62,6 @@ class GlobalMarginalReturnOptimizerRMSE:
         df['conversion_efficiency'] = df['Conversions'] / df[self.spend_col]
         df['spend_conv_ratio'] = df[self.spend_col] / df['Conversions']
         
-        # Seasonality features
-        if 'week_start' in df.columns:
-            df['month'] = df['week_start'].dt.month
-            df['quarter'] = df['week_start'].dt.quarter
-            df['day_of_week'] = df['week_start'].dt.dayofweek
-        
         # Moving averages with different windows
         for window in [3, 7, 14]:
             df[f'spend_ma_{window}'] = df[self.spend_col].rolling(window=window).mean()
@@ -70,6 +76,13 @@ class GlobalMarginalReturnOptimizerRMSE:
         
         # Fill any NaN values with 0
         df = df.fillna(0)
+        
+        # Ensure all columns are numeric
+        for col in df.columns:
+            if not np.issubdtype(df[col].dtype, np.number):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = df[col].fillna(0)
+        
         return df
     
     def calculate_enhanced_metrics(self, y_true, y_pred, X):
