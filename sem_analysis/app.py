@@ -4,11 +4,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from global_marginal_return_optimizer import global_marginal_return_optimizer, plot_response_curves_conversions
 from global_marginal_return_optimizer_multi_variant import global_marginal_return_optimizer_multi_variant
+from global_marginal_return_RMSE_optimized import GlobalMarginalReturnOptimizerRMSE
 import os
 import base64
 from io import BytesIO
 import logging
 import numpy as np
+from global_marginal_return_optimizer import GlobalMarginalReturnOptimizer
+from global_marginal_return_optimizer_multi_variant import GlobalMarginalReturnOptimizerMulti
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -50,13 +53,10 @@ Use the controls below to adjust parameters and view optimization results.
 st.sidebar.header("Optimization Parameters")
 
 # Model selection
-model_choice = st.sidebar.radio(
-    "Select Optimization Model",
-    (
-        "Diminishing Returns Model",
-        "Multi-Factor Optimization Model"
-    ),
-    help="Choose which model to use for budget optimization."
+model_type = st.sidebar.selectbox(
+    "Select Model Type",
+    ["Basic Model", "Multi-Factor Model", "RMSE-Optimized Model"],
+    help="Choose the model type for budget optimization"
 )
 
 # File uploader
@@ -96,14 +96,62 @@ try:
     df = load_data(uploaded_file)
     
     # Show which model is active
-    st.markdown(f"### Model in Use: **{model_choice}**")
+    st.markdown(f"### Model in Use: **{model_type}**")
     
-    # Run the selected optimization model
-    if model_choice == "Diminishing Returns Model":
-        results_df, adgroup_rmses = global_marginal_return_optimizer(df, total_budget)
-        skipped_adgroups = []
+    # Initialize the appropriate model
+    if model_type == "Basic Model":
+        optimizer = GlobalMarginalReturnOptimizer(
+            data=df,
+            min_spend=min_spend,
+            max_spend=max_spend,
+            step=step,
+            confidence_threshold=confidence_threshold
+        )
+    elif model_type == "Multi-Factor Model":
+        optimizer = GlobalMarginalReturnOptimizerMulti(
+            data=df,
+            min_spend=min_spend,
+            max_spend=max_spend,
+            step=step,
+            confidence_threshold=confidence_threshold
+        )
+    else:  # RMSE-Optimized Model
+        optimizer = GlobalMarginalReturnOptimizerRMSE(
+            data=df,
+            min_spend=min_spend,
+            max_spend=max_spend,
+            step=step,
+            confidence_threshold=confidence_threshold
+        )
+    
+    # Add model description
+    if model_type == "Basic Model":
+        st.sidebar.info("""
+        **Basic Model:**
+        - Simple linear regression
+        - Focuses on spend vs. conversions
+        - Good for stable, linear relationships
+        """)
+    elif model_type == "Multi-Factor Model":
+        st.sidebar.info("""
+        **Multi-Factor Model:**
+        - Includes CTR and CVR metrics
+        - Better for complex relationships
+        - More comprehensive analysis
+        """)
     else:
-        results_df, skipped_adgroups, adgroup_rmses = global_marginal_return_optimizer_multi_variant(df, total_budget)
+        st.sidebar.info("""
+        **RMSE-Optimized Model:**
+        - Ensemble of Random Forest and Gradient Boosting
+        - Advanced feature engineering
+        - Focuses on minimizing prediction errors
+        - Better for non-linear relationships
+        - More robust to outliers
+        """)
+    
+    # Run optimization
+    results_df, adgroup_rmses = global_marginal_return_optimizer(df, total_budget)
+    skipped_adgroups = []
     
     # Calculate overall RMSE (weighted by number of data points per ad group)
     if adgroup_rmses:
@@ -273,16 +321,107 @@ try:
                     'Expected_TCPA': '${:,.2f}',
                     'Marginal_Conversion_per_Dollar': '{:.4f}',
                     'Confidence': '{:.2%}',
-                    'RMSE': '{:.2f}'
+                    'RMSE': '{:.2f}',
+                    'MAPE': '{:.1f}%',
+                    'NRMSE': '{:.1f}%',
+                    'Stability': '{:.2%}',
+                    'Direction_Accuracy': '{:.2%}',
+                    'Spend_Efficiency': '{:.4f}',
+                    'ROI_Projection': '{:.1f}%',
+                    'Break_Even_Point': '{:.1f}',
+                    'CTR': '{:.2%}',
+                    'CVR': '{:.2%}',
+                    'CTR_Impact': '{:.2%}',
+                    'CVR_Impact': '{:.2%}'
                 }),
                 use_container_width=True
             )
+
+            # Model Performance Visualization
+            if model_type == "RMSE-Optimized Model":
+                st.subheader("Model Performance Visualization")
+                selected_adgroup = st.selectbox(
+                    "Select Ad Group to View Performance",
+                    options=filtered_df['AdGroup'].unique()
+                )
+                
+                if selected_adgroup in optimizer.performance_plots:
+                    actual_vs_pred, residuals = optimizer.performance_plots[selected_adgroup]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.plotly_chart(actual_vs_pred, use_container_width=True)
+                    with col2:
+                        st.plotly_chart(residuals, use_container_width=True)
+                    
+                    # Display detailed metrics for selected ad group
+                    adgroup_metrics = filtered_df[filtered_df['AdGroup'] == selected_adgroup].iloc[0]
+                    
+                    st.subheader("Detailed Metrics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("R² Score", f"{adgroup_metrics['R2']:.2%}")
+                        st.metric("RMSE", f"{adgroup_metrics['RMSE']:.2f}")
+                        st.metric("MAPE", f"{adgroup_metrics['MAPE']:.1f}%")
+                    
+                    with col2:
+                        st.metric("NRMSE", f"{adgroup_metrics['NRMSE']:.1f}%")
+                        st.metric("Stability", f"{adgroup_metrics['Stability']:.2%}")
+                        st.metric("Direction Accuracy", f"{adgroup_metrics['Direction_Accuracy']:.2%}")
+                    
+                    with col3:
+                        st.metric("Spend Efficiency", f"{adgroup_metrics['Spend_Efficiency']:.4f}")
+                        st.metric("ROI Projection", f"{adgroup_metrics['ROI_Projection']:.1f}%")
+                        st.metric("Break-Even Point", f"{adgroup_metrics['Break_Even_Point']:.1f}")
+                    
+                    with col4:
+                        if 'CTR' in adgroup_metrics:
+                            st.metric("CTR", f"{adgroup_metrics['CTR']:.2%}")
+                        if 'CVR' in adgroup_metrics:
+                            st.metric("CVR", f"{adgroup_metrics['CVR']:.2%}")
+                        if 'CTR_Impact' in adgroup_metrics:
+                            st.metric("CTR Impact", f"{adgroup_metrics['CTR_Impact']:.2%}")
+                        if 'CVR_Impact' in adgroup_metrics:
+                            st.metric("CVR Impact", f"{adgroup_metrics['CVR_Impact']:.2%}")
 
             # Business Justifications
             st.subheader("Business Justifications")
             for _, row in filtered_df.iterrows():
                 with st.expander(f"📊 {row['AdGroup']} ({row['Confidence_Level']})"):
                     st.markdown(row['Business_Justification'])
+                    if model_type == "RMSE-Optimized Model":
+                        metrics_text = """
+                        **Model Performance Metrics:**
+                        - R² Score: {:.2%}
+                        - RMSE: {:.2f}
+                        - MAPE: {:.1f}%
+                        - NRMSE: {:.1f}%
+                        - Stability: {:.2%}
+                        - Direction Accuracy: {:.2%}
+                        
+                        **Business Impact:**
+                        - Spend Efficiency: {:.4f}
+                        - ROI Projection: {:.1f}%
+                        - Break-Even Point: {:.1f}
+                        """.format(
+                            row['R2'], row['RMSE'], row['MAPE'], row['NRMSE'],
+                            row['Stability'], row['Direction_Accuracy'],
+                            row['Spend_Efficiency'], row['ROI_Projection'],
+                            row['Break_Even_Point']
+                        )
+                        
+                        # Add CTR and CVR metrics if available
+                        if 'CTR' in row:
+                            metrics_text += f"\n**Engagement Metrics:**\n- CTR: {row['CTR']:.2%}"
+                        if 'CVR' in row:
+                            metrics_text += f"\n- CVR: {row['CVR']:.2%}"
+                        if 'CTR_Impact' in row:
+                            metrics_text += f"\n- CTR Impact: {row['CTR_Impact']:.2%}"
+                        if 'CVR_Impact' in row:
+                            metrics_text += f"\n- CVR Impact: {row['CVR_Impact']:.2%}"
+                        
+                        st.markdown(metrics_text)
 
             # Download buttons
             st.sidebar.markdown("---")
