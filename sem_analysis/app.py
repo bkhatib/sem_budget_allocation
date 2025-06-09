@@ -79,23 +79,23 @@ if model_type == "RMSE-Optimized Model":
     min_spend = st.sidebar.number_input(
         "Minimum Spend ($)",
         min_value=0.1,
-        max_value=1000,
+        max_value=1000.0,
         value=0.1,
         step=0.1,
         help="Minimum spend per ad group"
     )
     max_spend = st.sidebar.number_input(
         "Maximum Spend ($)",
-        min_value=1000,
-        max_value=100000,
-        value=1000,
-        step=100,
+        min_value=1000.0,
+        max_value=100000.0,
+        value=1000.0,
+        step=100.0,
         help="Maximum spend per ad group"
     )
     step = st.sidebar.number_input(
         "Optimization Step Size ($)",
         min_value=0.1,
-        max_value=100,
+        max_value=100.0,
         value=0.1,
         step=0.1,
         help="Step size for optimization"
