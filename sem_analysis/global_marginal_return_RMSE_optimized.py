@@ -272,6 +272,12 @@ class GlobalMarginalReturnOptimizerRMSE:
         best_marginal_return = -np.inf
         best_confidence = 0
         best_metrics = {}
+        best_business_metrics = {}
+        
+        current_spend = adgroup_data[self.spend_col].iloc[-1]
+        current_conversions = adgroup_data[self.target_col].iloc[-1]
+        current_ctr = adgroup_data['Clicks'].iloc[-1] / adgroup_data['Impressions'].iloc[-1] if 'Clicks' in adgroup_data.columns and 'Impressions' in adgroup_data.columns else None
+        current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
         
         for spend in spend_range:
             # Create prediction input
@@ -287,8 +293,18 @@ class GlobalMarginalReturnOptimizerRMSE:
             y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
             metrics = self.calculate_enhanced_metrics(y, y_pred, X)
             
+            # Calculate business metrics
+            business_metrics = self.calculate_business_metrics(
+                current_spend, spend,
+                current_conversions, pred_conversions,
+                current_ctr, current_cvr
+            )
+            
+            # Combine metrics for confidence calculation
+            combined_metrics = {**metrics, **business_metrics}
+            
             # Calculate confidence
-            confidence = self.calculate_enhanced_confidence(metrics)
+            confidence = self.calculate_enhanced_confidence(combined_metrics)
             
             # Calculate marginal return
             if spend > 0:
@@ -299,26 +315,10 @@ class GlobalMarginalReturnOptimizerRMSE:
                     best_spend = spend
                     best_confidence = confidence
                     best_metrics = metrics
+                    best_business_metrics = business_metrics
         
         if best_spend is None:
             return None
-        
-        # Calculate business metrics
-        current_spend = adgroup_data[self.spend_col].iloc[-1]
-        current_conversions = adgroup_data[self.target_col].iloc[-1]
-        current_ctr = adgroup_data['Clicks'].iloc[-1] / adgroup_data['Impressions'].iloc[-1] if 'Clicks' in adgroup_data.columns and 'Impressions' in adgroup_data.columns else None
-        current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
-        
-        expected_conversions = self.predict_with_ensemble(
-            self.scaler.transform(self.engineer_features(pd.DataFrame({self.spend_col: [best_spend]}))),
-            rf_model, gb_model, rf_weight, gb_weight
-        )[0]
-        
-        business_metrics = self.calculate_business_metrics(
-            current_spend, best_spend,
-            current_conversions, expected_conversions,
-            current_ctr, current_cvr
-        )
         
         # Generate performance plots
         y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
@@ -346,8 +346,8 @@ class GlobalMarginalReturnOptimizerRMSE:
             'Current_Conversions': current_conversions,
             'Current_TCPA': current_spend / current_conversions if current_conversions > 0 else float('inf'),
             'Recommended_Spend': best_spend,
-            'Expected_Conversions': expected_conversions,
-            'Expected_TCPA': best_spend / expected_conversions if expected_conversions > 0 else float('inf'),
+            'Expected_Conversions': pred_conversions,
+            'Expected_TCPA': best_spend / pred_conversions if pred_conversions > 0 else float('inf'),
             'Marginal_Conversion_per_Dollar': best_marginal_return,
             'Confidence': best_confidence,
             'Confidence_Level': confidence_level,
@@ -357,9 +357,9 @@ class GlobalMarginalReturnOptimizerRMSE:
             'NRMSE': best_metrics['NRMSE'],
             'Stability': best_metrics['Stability'],
             'Direction_Accuracy': best_metrics['Direction_Accuracy'],
-            'Spend_Efficiency': business_metrics['Spend_Efficiency'],
-            'ROI_Projection': business_metrics['ROI_Projection'],
-            'Break_Even_Point': business_metrics['Break_Even_Point'],
+            'Spend_Efficiency': best_business_metrics['Spend_Efficiency'],
+            'ROI_Projection': best_business_metrics['ROI_Projection'],
+            'Break_Even_Point': best_business_metrics['Break_Even_Point'],
             'Business_Justification': justification
         }
         
