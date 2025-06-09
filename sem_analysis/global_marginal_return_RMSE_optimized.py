@@ -79,7 +79,11 @@ class GlobalMarginalReturnOptimizerRMSE:
         
         # Ensure all columns are numeric
         for col in df.columns:
-            if not np.issubdtype(df[col].dtype, np.number):
+            try:
+                # Try to convert to float, which handles both numeric and nullable integer types
+                df[col] = df[col].astype(float)
+            except (ValueError, TypeError):
+                # If conversion fails, try to convert to numeric with coerce
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 df[col] = df[col].fillna(0)
         
