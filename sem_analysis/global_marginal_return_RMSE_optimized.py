@@ -41,51 +41,58 @@ class GlobalMarginalReturnOptimizerRMSE:
         df['spend_cubed'] = df[self.spend_col] ** 3
         df['spend_log'] = np.log1p(df[self.spend_col])
         
-        # CTR and CVR metrics
-        df['CTR'] = df['Clicks'] / df['Impressions']
-        df['CVR'] = df['Conversions'] / df['Clicks']
+        # CTR and CVR metrics with safe division
+        df['CTR'] = df['Clicks'].div(df['Impressions'].replace(0, np.nan)).fillna(0)
+        df['CVR'] = df['Conversions'].div(df['Clicks'].replace(0, np.nan)).fillna(0)
         
         # CTR and CVR trends
-        df['CTR_velocity'] = df['CTR'].diff()
-        df['CVR_velocity'] = df['CVR'].diff()
+        df['CTR_velocity'] = df['CTR'].diff().fillna(0)
+        df['CVR_velocity'] = df['CVR'].diff().fillna(0)
         
         # CTR and CVR moving averages
         for window in [3, 7, 14]:
-            df[f'CTR_ma_{window}'] = df['CTR'].rolling(window=window).mean()
-            df[f'CVR_ma_{window}'] = df['CVR'].rolling(window=window).mean()
+            df[f'CTR_ma_{window}'] = df['CTR'].rolling(window=window, min_periods=1).mean().fillna(0)
+            df[f'CVR_ma_{window}'] = df['CVR'].rolling(window=window, min_periods=1).mean().fillna(0)
         
         # Spend velocity and trends
-        df['spend_velocity'] = df[self.spend_col].diff()
-        df['spend_acceleration'] = df['spend_velocity'].diff()
+        df['spend_velocity'] = df[self.spend_col].diff().fillna(0)
+        df['spend_acceleration'] = df['spend_velocity'].diff().fillna(0)
         
-        # Conversion efficiency metrics
-        df['conversion_efficiency'] = df['Conversions'] / df[self.spend_col]
-        df['spend_conv_ratio'] = df[self.spend_col] / df['Conversions']
+        # Conversion efficiency metrics with safe division
+        df['conversion_efficiency'] = df['Conversions'].div(df[self.spend_col].replace(0, np.nan)).fillna(0)
+        df['spend_conv_ratio'] = df[self.spend_col].div(df['Conversions'].replace(0, np.nan)).fillna(0)
         
         # Moving averages with different windows
         for window in [3, 7, 14]:
-            df[f'spend_ma_{window}'] = df[self.spend_col].rolling(window=window).mean()
-            df[f'conversion_ma_{window}'] = df['Conversions'].rolling(window=window).mean()
-            df[f'spend_conv_ratio_ma_{window}'] = df['spend_conv_ratio'].rolling(window=window).mean()
+            df[f'spend_ma_{window}'] = df[self.spend_col].rolling(window=window, min_periods=1).mean().fillna(0)
+            df[f'conversion_ma_{window}'] = df['Conversions'].rolling(window=window, min_periods=1).mean().fillna(0)
+            df[f'spend_conv_ratio_ma_{window}'] = df['spend_conv_ratio'].rolling(window=window, min_periods=1).mean().fillna(0)
         
         # Volatility metrics
-        df['spend_volatility'] = df[self.spend_col].rolling(window=3).std()
-        df['conversion_volatility'] = df['Conversions'].rolling(window=3).std()
-        df['CTR_volatility'] = df['CTR'].rolling(window=3).std()
-        df['CVR_volatility'] = df['CVR'].rolling(window=3).std()
+        df['spend_volatility'] = df[self.spend_col].rolling(window=3, min_periods=1).std().fillna(0)
+        df['conversion_volatility'] = df['Conversions'].rolling(window=3, min_periods=1).std().fillna(0)
+        df['CTR_volatility'] = df['CTR'].rolling(window=3, min_periods=1).std().fillna(0)
+        df['CVR_volatility'] = df['CVR'].rolling(window=3, min_periods=1).std().fillna(0)
         
         # Fill any NaN values with 0
         df = df.fillna(0)
         
-        # Ensure all columns are numeric
+        # Ensure all columns are numeric and within float64 limits
         for col in df.columns:
             try:
-                # Try to convert to float, which handles both numeric and nullable integer types
+                # Convert to float and handle infinities
                 df[col] = df[col].astype(float)
+                # Replace infinities with large but finite values
+                df[col] = df[col].replace([np.inf, -np.inf], [1e9, -1e9])
+                # Clip values to float64 limits
+                df[col] = df[col].clip(-1e9, 1e9)
             except (ValueError, TypeError):
                 # If conversion fails, try to convert to numeric with coerce
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 df[col] = df[col].fillna(0)
+                # Replace infinities and clip values
+                df[col] = df[col].replace([np.inf, -np.inf], [1e9, -1e9])
+                df[col] = df[col].clip(-1e9, 1e9)
         
         return df
     
