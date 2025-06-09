@@ -10,8 +10,6 @@ import base64
 from io import BytesIO
 import logging
 import numpy as np
-from global_marginal_return_optimizer import GlobalMarginalReturnOptimizer
-from global_marginal_return_optimizer_multi_variant import GlobalMarginalReturnOptimizerMulti
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -100,21 +98,10 @@ try:
     
     # Initialize the appropriate model
     if model_type == "Basic Model":
-        optimizer = GlobalMarginalReturnOptimizer(
-            data=df,
-            min_spend=min_spend,
-            max_spend=max_spend,
-            step=step,
-            confidence_threshold=confidence_threshold
-        )
+        results_df, adgroup_rmses = global_marginal_return_optimizer(df, total_budget)
+        skipped_adgroups = []
     elif model_type == "Multi-Factor Model":
-        optimizer = GlobalMarginalReturnOptimizerMulti(
-            data=df,
-            min_spend=min_spend,
-            max_spend=max_spend,
-            step=step,
-            confidence_threshold=confidence_threshold
-        )
+        results_df, skipped_adgroups, adgroup_rmses = global_marginal_return_optimizer_multi_variant(df, total_budget)
     else:  # RMSE-Optimized Model
         optimizer = GlobalMarginalReturnOptimizerRMSE(
             data=df,
@@ -123,35 +110,29 @@ try:
             step=step,
             confidence_threshold=confidence_threshold
         )
+        results_df = optimizer.optimize_all_adgroups()
+        skipped_adgroups = []
+        adgroup_rmses = []  # We'll calculate this from the results_df
     
     # Add model description
     if model_type == "Basic Model":
-        st.sidebar.info("""
-        **Basic Model:**
-        - Simple linear regression
-        - Focuses on spend vs. conversions
-        - Good for stable, linear relationships
+        st.markdown("""
+        ### Basic Model
+        This model uses a simple logarithmic function to model the relationship between spend and conversions.
+        It optimizes budget allocation based on marginal returns, considering only spend and conversion data.
         """)
     elif model_type == "Multi-Factor Model":
-        st.sidebar.info("""
-        **Multi-Factor Model:**
-        - Includes CTR and CVR metrics
-        - Better for complex relationships
-        - More comprehensive analysis
+        st.markdown("""
+        ### Multi-Factor Model
+        This model incorporates CTR and CVR metrics to provide a more comprehensive view of ad performance.
+        It considers the relationships between spend, impressions, clicks, and conversions to make more informed budget decisions.
         """)
-    else:
-        st.sidebar.info("""
-        **RMSE-Optimized Model:**
-        - Ensemble of Random Forest and Gradient Boosting
-        - Advanced feature engineering
-        - Focuses on minimizing prediction errors
-        - Better for non-linear relationships
-        - More robust to outliers
+    else:  # RMSE-Optimized Model
+        st.markdown("""
+        ### RMSE-Optimized Model
+        This model uses advanced optimization techniques to minimize prediction error (RMSE) while maximizing conversion potential.
+        It includes CTR and CVR metrics, plus additional features for enhanced accuracy.
         """)
-    
-    # Run optimization
-    results_df, adgroup_rmses = global_marginal_return_optimizer(df, total_budget)
-    skipped_adgroups = []
     
     # Calculate overall RMSE (weighted by number of data points per ad group)
     if adgroup_rmses:
