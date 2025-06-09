@@ -7,7 +7,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 import plotly.graph_objects as go
 import warnings
+import logging
 warnings.filterwarnings('ignore')
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 class GlobalMarginalReturnOptimizerRMSE:
     def __init__(self, data, target_col='Conversions', spend_col='Spend', 
@@ -21,14 +30,17 @@ class GlobalMarginalReturnOptimizerRMSE:
         self.confidence_threshold = confidence_threshold
         self.scaler = StandardScaler()
         self.performance_plots = {}
+        logger.info(f"Initialized RMSE-optimized model with {len(data)} rows of data")
         
     def engineer_features(self, df):
         """Engineer additional features to improve model performance"""
+        logger.info("Starting feature engineering")
         # Create a copy to avoid modifying the original dataframe
         df = df.copy()
         
         # Convert timestamp to numeric features if it exists
         if 'week_start' in df.columns:
+            logger.info("Converting timestamp features")
             df['month'] = df['week_start'].dt.month
             df['quarter'] = df['week_start'].dt.quarter
             df['day_of_week'] = df['week_start'].dt.dayofweek
@@ -37,15 +49,18 @@ class GlobalMarginalReturnOptimizerRMSE:
             df = df.drop('week_start', axis=1)
         
         # Basic spend features
+        logger.info("Creating basic spend features")
         df['spend_squared'] = df[self.spend_col] ** 2
         df['spend_cubed'] = df[self.spend_col] ** 3
         df['spend_log'] = np.log1p(df[self.spend_col])
         
         # CTR and CVR metrics with safe division
+        logger.info("Calculating CTR and CVR metrics")
         df['CTR'] = df['Clicks'].div(df['Impressions'].replace(0, np.nan)).fillna(0)
         df['CVR'] = df['Conversions'].div(df['Clicks'].replace(0, np.nan)).fillna(0)
         
         # CTR and CVR trends
+        logger.info("Calculating trends and moving averages")
         df['CTR_velocity'] = df['CTR'].diff().fillna(0)
         df['CVR_velocity'] = df['CVR'].diff().fillna(0)
         
@@ -59,6 +74,7 @@ class GlobalMarginalReturnOptimizerRMSE:
         df['spend_acceleration'] = df['spend_velocity'].diff().fillna(0)
         
         # Conversion efficiency metrics with safe division
+        logger.info("Calculating efficiency metrics")
         df['conversion_efficiency'] = df['Conversions'].div(df[self.spend_col].replace(0, np.nan)).fillna(0)
         df['spend_conv_ratio'] = df[self.spend_col].div(df['Conversions'].replace(0, np.nan)).fillna(0)
         
@@ -69,6 +85,7 @@ class GlobalMarginalReturnOptimizerRMSE:
             df[f'spend_conv_ratio_ma_{window}'] = df['spend_conv_ratio'].rolling(window=window, min_periods=1).mean().fillna(0)
         
         # Volatility metrics
+        logger.info("Calculating volatility metrics")
         df['spend_volatility'] = df[self.spend_col].rolling(window=3, min_periods=1).std().fillna(0)
         df['conversion_volatility'] = df['Conversions'].rolling(window=3, min_periods=1).std().fillna(0)
         df['CTR_volatility'] = df['CTR'].rolling(window=3, min_periods=1).std().fillna(0)
@@ -78,6 +95,7 @@ class GlobalMarginalReturnOptimizerRMSE:
         df = df.fillna(0)
         
         # Ensure all columns are numeric and within float64 limits
+        logger.info("Ensuring numeric values and handling infinities")
         for col in df.columns:
             try:
                 # Convert to float and handle infinities
@@ -94,6 +112,7 @@ class GlobalMarginalReturnOptimizerRMSE:
                 df[col] = df[col].replace([np.inf, -np.inf], [1e9, -1e9])
                 df[col] = df[col].clip(-1e9, 1e9)
         
+        logger.info(f"Feature engineering complete. Final shape: {df.shape}")
         return df
     
     def calculate_enhanced_metrics(self, y_true, y_pred, X):
@@ -258,17 +277,24 @@ class GlobalMarginalReturnOptimizerRMSE:
     
     def optimize_budget(self, adgroup_data):
         """Optimize budget for a single ad group with RMSE-optimized approach"""
+        adgroup_name = adgroup_data['AdGroup'].iloc[0]
+        logger.info(f"Starting budget optimization for {adgroup_name}")
+        
         if len(adgroup_data) < 3:
+            logger.warning(f"Insufficient data points for {adgroup_name}. Skipping.")
             return None
         
         # Engineer features
+        logger.info(f"Engineering features for {adgroup_name}")
         X = self.engineer_features(adgroup_data.copy())
         y = adgroup_data[self.target_col]
         
         # Scale features
+        logger.info(f"Scaling features for {adgroup_name}")
         X_scaled = self.scaler.fit_transform(X)
         
         # Fit ensemble model
+        logger.info(f"Fitting ensemble model for {adgroup_name}")
         rf_model, gb_model, rf_weight, gb_weight = self.fit_ensemble_model(X_scaled, y)
         
         # Generate spend range with fewer points
@@ -278,6 +304,7 @@ class GlobalMarginalReturnOptimizerRMSE:
         current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
         
         # Create a more focused spend range around current spend
+        logger.info(f"Generating spend range for {adgroup_name}")
         spend_range = np.concatenate([
             np.linspace(max(self.min_spend, current_spend * 0.5), current_spend * 0.9, 10),
             np.linspace(current_spend * 0.9, current_spend * 1.1, 5),
@@ -297,7 +324,11 @@ class GlobalMarginalReturnOptimizerRMSE:
         max_no_improvement = 5
         last_best_marginal_return = -np.inf
         
+        logger.info(f"Starting spend optimization for {adgroup_name}")
         for i, spend in enumerate(spend_range):
+            if i % 5 == 0:  # Log progress every 5 iterations
+                logger.info(f"Evaluating spend point {i+1}/{len(spend_range)} for {adgroup_name}")
+            
             # Create prediction input
             pred_input = X.iloc[-1:].copy()
             pred_input[self.spend_col] = spend
@@ -336,6 +367,7 @@ class GlobalMarginalReturnOptimizerRMSE:
                         best_confidence = confidence
                         best_metrics = metrics
                         best_business_metrics = business_metrics
+                        logger.info(f"Found better solution for {adgroup_name}: spend={spend:.2f}, confidence={confidence:.2f}")
                         
                         # Reset no improvement counter
                         no_improvement_count = 0
@@ -344,14 +376,17 @@ class GlobalMarginalReturnOptimizerRMSE:
                     
                     # Early stopping check
                     if no_improvement_count >= max_no_improvement:
+                        logger.info(f"Early stopping triggered for {adgroup_name} after {i+1} iterations")
                         break
         
         if best_spend is None:
+            logger.warning(f"No valid solution found for {adgroup_name}")
             return None
         
         # Generate performance plots
+        logger.info(f"Generating performance plots for {adgroup_name}")
         y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
-        self.performance_plots[adgroup_data['AdGroup'].iloc[0]] = self.generate_performance_plots(y, y_pred, adgroup_data['AdGroup'].iloc[0])
+        self.performance_plots[adgroup_name] = self.generate_performance_plots(y, y_pred, adgroup_name)
         
         # Determine confidence level
         if best_confidence >= 0.8:
@@ -370,7 +405,7 @@ class GlobalMarginalReturnOptimizerRMSE:
             justification = "Current spend level is optimal"
         
         result = {
-            'AdGroup': adgroup_data['AdGroup'].iloc[0],
+            'AdGroup': adgroup_name,
             'Current_Spend': current_spend,
             'Current_Conversions': current_conversions,
             'Current_TCPA': current_spend / current_conversions if current_conversions > 0 else float('inf'),
@@ -402,16 +437,23 @@ class GlobalMarginalReturnOptimizerRMSE:
         if 'CVR_Impact' in best_metrics:
             result['CVR_Impact'] = best_metrics['CVR_Impact']
         
+        logger.info(f"Completed optimization for {adgroup_name}")
         return result
     
     def optimize_all_adgroups(self):
         """Optimize budgets for all ad groups"""
+        logger.info("Starting optimization for all ad groups")
         results = []
         
         for adgroup in self.data['AdGroup'].unique():
+            logger.info(f"Processing AdGroup: {adgroup}")
             adgroup_data = self.data[self.data['AdGroup'] == adgroup].copy()
             result = self.optimize_budget(adgroup_data)
             if result:
                 results.append(result)
+                logger.info(f"Successfully optimized {adgroup}")
+            else:
+                logger.warning(f"Failed to optimize {adgroup}")
         
+        logger.info(f"Completed optimization for all ad groups. Processed {len(results)} ad groups successfully.")
         return pd.DataFrame(results)
