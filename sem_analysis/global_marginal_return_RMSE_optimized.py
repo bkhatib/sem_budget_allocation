@@ -264,8 +264,19 @@ class GlobalMarginalReturnOptimizerRMSE:
         # Fit ensemble model
         rf_model, gb_model, rf_weight, gb_weight = self.fit_ensemble_model(X_scaled, y)
         
-        # Generate spend range
-        spend_range = np.arange(self.min_spend, self.max_spend + self.step, self.step)
+        # Generate spend range with fewer points
+        current_spend = adgroup_data[self.spend_col].iloc[-1]
+        current_conversions = adgroup_data[self.target_col].iloc[-1]
+        current_ctr = adgroup_data['Clicks'].iloc[-1] / adgroup_data['Impressions'].iloc[-1] if 'Clicks' in adgroup_data.columns and 'Impressions' in adgroup_data.columns else None
+        current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
+        
+        # Create a more focused spend range around current spend
+        spend_range = np.concatenate([
+            np.linspace(max(self.min_spend, current_spend * 0.5), current_spend * 0.9, 10),
+            np.linspace(current_spend * 0.9, current_spend * 1.1, 5),
+            np.linspace(current_spend * 1.1, min(self.max_spend, current_spend * 2), 10)
+        ])
+        spend_range = np.unique(spend_range)
         
         # Calculate marginal returns
         best_spend = None
@@ -274,12 +285,12 @@ class GlobalMarginalReturnOptimizerRMSE:
         best_metrics = {}
         best_business_metrics = {}
         
-        current_spend = adgroup_data[self.spend_col].iloc[-1]
-        current_conversions = adgroup_data[self.target_col].iloc[-1]
-        current_ctr = adgroup_data['Clicks'].iloc[-1] / adgroup_data['Impressions'].iloc[-1] if 'Clicks' in adgroup_data.columns and 'Impressions' in adgroup_data.columns else None
-        current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
+        # Early stopping variables
+        no_improvement_count = 0
+        max_no_improvement = 5
+        last_best_marginal_return = -np.inf
         
-        for spend in spend_range:
+        for i, spend in enumerate(spend_range):
             # Create prediction input
             pred_input = X.iloc[-1:].copy()
             pred_input[self.spend_col] = spend
@@ -289,33 +300,44 @@ class GlobalMarginalReturnOptimizerRMSE:
             # Get ensemble prediction
             pred_conversions = self.predict_with_ensemble(pred_input_scaled, rf_model, gb_model, rf_weight, gb_weight)[0]
             
-            # Calculate metrics
-            y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
-            metrics = self.calculate_enhanced_metrics(y, y_pred, X)
-            
-            # Calculate business metrics
-            business_metrics = self.calculate_business_metrics(
-                current_spend, spend,
-                current_conversions, pred_conversions,
-                current_ctr, current_cvr
-            )
-            
-            # Combine metrics for confidence calculation
-            combined_metrics = {**metrics, **business_metrics}
-            
-            # Calculate confidence
-            confidence = self.calculate_enhanced_confidence(combined_metrics)
-            
-            # Calculate marginal return
-            if spend > 0:
-                marginal_return = pred_conversions / spend
+            # Calculate metrics only if we have a reasonable prediction
+            if pred_conversions > 0:
+                # Calculate metrics
+                y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
+                metrics = self.calculate_enhanced_metrics(y, y_pred, X)
                 
-                if marginal_return > best_marginal_return and confidence >= self.confidence_threshold:
-                    best_marginal_return = marginal_return
-                    best_spend = spend
-                    best_confidence = confidence
-                    best_metrics = metrics
-                    best_business_metrics = business_metrics
+                # Calculate business metrics
+                business_metrics = self.calculate_business_metrics(
+                    current_spend, spend,
+                    current_conversions, pred_conversions,
+                    current_ctr, current_cvr
+                )
+                
+                # Combine metrics for confidence calculation
+                combined_metrics = {**metrics, **business_metrics}
+                
+                # Calculate confidence
+                confidence = self.calculate_enhanced_confidence(combined_metrics)
+                
+                # Calculate marginal return
+                if spend > 0:
+                    marginal_return = pred_conversions / spend
+                    
+                    if marginal_return > best_marginal_return and confidence >= self.confidence_threshold:
+                        best_marginal_return = marginal_return
+                        best_spend = spend
+                        best_confidence = confidence
+                        best_metrics = metrics
+                        best_business_metrics = business_metrics
+                        
+                        # Reset no improvement counter
+                        no_improvement_count = 0
+                    else:
+                        no_improvement_count += 1
+                    
+                    # Early stopping check
+                    if no_improvement_count >= max_no_improvement:
+                        break
         
         if best_spend is None:
             return None
