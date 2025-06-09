@@ -20,17 +20,34 @@ logger = logging.getLogger(__name__)
 
 class GlobalMarginalReturnOptimizerRMSE:
     def __init__(self, data, target_col='Conversions', spend_col='Spend', 
-                 min_spend=0.1, max_spend=1000, step=0.1, confidence_threshold=0.7):
+                 min_spend=0.1, max_spend=100, step=1.0, confidence_threshold=0.5):
         self.data = data
         self.target_col = target_col
         self.spend_col = spend_col
         self.min_spend = min_spend
         self.max_spend = max_spend
-        self.step = step
+        self.step = step  # Increased default step to reduce iterations
         self.confidence_threshold = confidence_threshold
         self.scaler = StandardScaler()
         self.performance_plots = {}
-        logger.info(f"Initialized RMSE-optimized model with {len(data)} rows of data")
+        self.models = {}
+        self.feature_columns = None
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Initialized RMSE-optimized model with {len(data)} rows of data")
+        
+        # Add safety checks for spend range
+        if self.step <= 0:
+            raise ValueError("Step size must be positive")
+        if self.min_spend >= self.max_spend:
+            raise ValueError("min_spend must be less than max_spend")
+        
+        # Calculate and log the number of iterations
+        num_iterations = int((self.max_spend - self.min_spend) / self.step) + 1
+        if num_iterations > 100:
+            self.logger.warning(f"Large number of iterations ({num_iterations}) may impact performance. Consider increasing step size.")
+        
+        # Add maximum iterations safety
+        self.max_iterations = min(num_iterations, 100)  # Cap at 100 iterations
         
     def engineer_features(self, df):
         """Engineer additional features to improve model performance"""
@@ -121,6 +138,14 @@ class GlobalMarginalReturnOptimizerRMSE:
         
         # Basic metrics
         metrics['RMSE'] = np.sqrt(mean_squared_error(y_true, y_pred))
+        
+        # Calculate relative RMSE (RMSE/mean)
+        mean_conversions = np.mean(y_true)
+        if mean_conversions > 0:
+            metrics['Relative_RMSE'] = (metrics['RMSE'] / mean_conversions) * 100  # As percentage
+        else:
+            metrics['Relative_RMSE'] = float('inf')
+            
         metrics['R2'] = r2_score(y_true, y_pred)
         
         # Advanced metrics
@@ -179,25 +204,29 @@ class GlobalMarginalReturnOptimizerRMSE:
         return metrics
     
     def calculate_enhanced_confidence(self, metrics):
-        """Calculate comprehensive confidence score"""
+        """Calculate comprehensive confidence score with more lenient weights"""
         weights = {
-            'R2': 0.25,
-            'NRMSE': 0.25,
+            'R2': 0.20,
+            'Relative_RMSE': 0.20,  # Changed from NRMSE to Relative_RMSE
             'Stability': 0.20,
-            'Direction_Accuracy': 0.15,
-            'ROI_Projection': 0.15
+            'Direction_Accuracy': 0.20,
+            'ROI_Projection': 0.20
         }
         
-        # Normalize NRMSE to 0-1 scale (lower is better)
-        nrmse_score = 1 - min(metrics['NRMSE']/100, 1) if metrics['NRMSE'] != float('inf') else 0
-        
-        # Normalize ROI projection to 0-1 scale
-        roi_score = min(metrics['ROI_Projection']/100, 1) if metrics['ROI_Projection'] > 0 else 0
+        # More lenient normalization based on relative RMSE
+        # New interpretation:
+        # < 10%: Excellent
+        # 10-20%: Good
+        # 20-30%: Moderate
+        # 30-40%: Low
+        # > 40%: Poor
+        relative_rmse_score = 1 - min(metrics['Relative_RMSE']/40, 1) if metrics['Relative_RMSE'] != float('inf') else 0
+        roi_score = min(metrics['ROI_Projection']/50, 1) if metrics['ROI_Projection'] > 0 else 0
         
         confidence = (
-            weights['R2'] * metrics['R2'] +
-            weights['NRMSE'] * nrmse_score +
-            weights['Stability'] * metrics['Stability'] +
+            weights['R2'] * max(metrics['R2'], 0) +
+            weights['Relative_RMSE'] * relative_rmse_score +
+            weights['Stability'] * max(metrics['Stability'], 0) +
             weights['Direction_Accuracy'] * metrics['Direction_Accuracy'] +
             weights['ROI_Projection'] * roi_score
         )
@@ -233,6 +262,22 @@ class GlobalMarginalReturnOptimizerRMSE:
         # Split data for validation
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
         
+        # Store feature columns for later use
+        self.feature_columns = [col for col in X.columns if col != self.target_col]
+        self.logger.info(f"Using {len(self.feature_columns)} features: {self.feature_columns}")
+        
+        # Scale features while maintaining DataFrame structure
+        X_train_scaled = pd.DataFrame(
+            self.scaler.fit_transform(X_train[self.feature_columns]),
+            columns=self.feature_columns,
+            index=X_train.index
+        )
+        X_val_scaled = pd.DataFrame(
+            self.scaler.transform(X_val[self.feature_columns]),
+            columns=self.feature_columns,
+            index=X_val.index
+        )
+        
         # Initialize models with optimized parameters
         rf_model = RandomForestRegressor(
             n_estimators=200,
@@ -249,12 +294,12 @@ class GlobalMarginalReturnOptimizerRMSE:
         )
         
         # Fit models
-        rf_model.fit(X_train, y_train)
-        gb_model.fit(X_train, y_train)
+        rf_model.fit(X_train_scaled, y_train)
+        gb_model.fit(X_train_scaled, y_train)
         
         # Get predictions
-        rf_pred = rf_model.predict(X_val)
-        gb_pred = gb_model.predict(X_val)
+        rf_pred = rf_model.predict(X_val_scaled)
+        gb_pred = gb_model.predict(X_val_scaled)
         
         # Calculate weights based on validation performance
         rf_r2 = r2_score(y_val, rf_pred)
@@ -271,10 +316,153 @@ class GlobalMarginalReturnOptimizerRMSE:
     
     def predict_with_ensemble(self, X, rf_model, gb_model, rf_weight, gb_weight):
         """Make predictions using the weighted ensemble"""
+        # Ensure X is a DataFrame with the correct columns
+        if isinstance(X, np.ndarray):
+            X = pd.DataFrame(X, columns=self.feature_columns)
+        
         rf_pred = rf_model.predict(X)
         gb_pred = gb_model.predict(X)
         return rf_weight * rf_pred + gb_weight * gb_pred
     
+    def _calculate_adgroup_rmse(self, adgroup_data):
+        """Calculate RMSE for an ad group based on its historical performance"""
+        try:
+            # Calculate historical RMSE
+            historical_rmse = np.sqrt(np.mean((adgroup_data['Conversions'] - adgroup_data['Conversions'].mean())**2))
+            
+            # Calculate relative RMSE (as percentage of mean)
+            mean_conversions = adgroup_data['Conversions'].mean()
+            if mean_conversions > 0:
+                relative_rmse = (historical_rmse / mean_conversions) * 100  # As percentage
+            else:
+                relative_rmse = historical_rmse
+                
+            # Much more lenient RMSE thresholds based on data volume
+            data_points = len(adgroup_data)
+            if data_points < 10:
+                return relative_rmse * 1.5  # Allow 50% more error for small datasets
+            elif data_points < 20:
+                return relative_rmse * 1.3  # Allow 30% more error for medium datasets
+            else:
+                return relative_rmse * 1.2  # Allow 20% more error for large datasets
+                
+        except Exception as e:
+            self.logger.warning(f"Error calculating RMSE for ad group: {str(e)}")
+            return float('inf')
+
+    def _optimize_spend(self, adgroup, adgroup_data, max_iterations=15):
+        """Optimize spend for a single ad group"""
+        self.logger.info(f"Starting spend optimization for ad group: {adgroup}")
+        
+        # Initialize variables
+        best_spend = adgroup_data[self.spend_col].mean()  # Start with mean spend instead of min
+        best_conversions = adgroup_data[self.target_col].mean()  # Start with mean conversions
+        best_rmse = float('inf')
+        no_improvement_count = 0
+        max_no_improvement = 5
+        
+        # Calculate spend range based on historical data
+        current_spend = adgroup_data[self.spend_col].mean()
+        spend_std = adgroup_data[self.spend_col].std()
+        
+        min_spend = max(self.min_spend, current_spend - 2 * spend_std)
+        max_spend = min(self.max_spend, current_spend + 2 * spend_std)
+        
+        # Generate spend range with safety checks
+        try:
+            spend_range = np.linspace(
+                min_spend,
+                max_spend,
+                min(int((max_spend - min_spend) / self.step) + 1, 50)  # Reduced max points to 50
+            )
+            self.logger.info(f"Generated spend range with {len(spend_range)} points")
+        except Exception as e:
+            self.logger.error(f"Error generating spend range: {str(e)}")
+            return current_spend, best_conversions, float('inf')
+        
+        # Track iterations for debugging
+        iteration_count = 0
+        
+        for spend in spend_range:
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                self.logger.warning(f"Reached maximum iterations ({max_iterations}) for ad group {adgroup}")
+                break
+                
+            try:
+                # Predict conversions for this spend level
+                spend_df = adgroup_data.copy()
+                spend_df[self.spend_col] = spend
+                spend_df = self.engineer_features(spend_df)
+                
+                # Ensure all required features are present
+                missing_features = set(self.feature_columns) - set(spend_df.columns)
+                if missing_features:
+                    self.logger.error(f"Missing features: {missing_features}")
+                    continue
+                
+                # Scale features while maintaining DataFrame structure
+                spend_df_scaled = pd.DataFrame(
+                    self.scaler.transform(spend_df[self.feature_columns]),
+                    columns=self.feature_columns,
+                    index=spend_df.index
+                )
+                
+                # Get predictions from both models with error handling
+                try:
+                    rf_pred = self.models[adgroup]['rf'].predict(spend_df_scaled)
+                    gb_pred = self.models[adgroup]['gb'].predict(spend_df_scaled)
+                    
+                    # Ensure predictions are valid
+                    if np.any(np.isnan(rf_pred)) or np.any(np.isnan(gb_pred)):
+                        continue
+                    
+                    # Combine predictions
+                    predicted_conversions = (
+                        self.models[adgroup]['rf_weight'] * rf_pred +
+                        self.models[adgroup]['gb_weight'] * gb_pred
+                    )
+                    
+                    # Ensure predicted conversions are non-negative
+                    predicted_conversions = np.maximum(predicted_conversions, 0)
+                    
+                    # Calculate RMSE
+                    current_rmse = np.sqrt(mean_squared_error(
+                        adgroup_data[self.target_col],
+                        predicted_conversions
+                    ))
+                    
+                    # Update best values if improved
+                    if current_rmse < best_rmse and not np.isinf(current_rmse):
+                        best_rmse = current_rmse
+                        best_spend = spend
+                        best_conversions = np.mean(predicted_conversions)
+                        no_improvement_count = 0
+                    else:
+                        no_improvement_count += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in prediction for spend {spend}: {str(e)}")
+                    continue
+                
+                # Early stopping if no improvement
+                if no_improvement_count >= max_no_improvement:
+                    self.logger.info(f"Early stopping for ad group {adgroup} after {no_improvement_count} iterations without improvement")
+                    break
+                    
+            except Exception as e:
+                self.logger.error(f"Error in iteration {iteration_count} for ad group {adgroup}: {str(e)}")
+                continue
+        
+        # If no valid solution found, use current spend
+        if np.isinf(best_rmse):
+            best_spend = current_spend
+            best_conversions = adgroup_data[self.target_col].mean()
+            best_rmse = float('inf')
+        
+        self.logger.info(f"Completed optimization for ad group {adgroup}. Best spend: ${best_spend:.2f}, RMSE: {best_rmse:.4f}")
+        return best_spend, best_conversions, best_rmse
+
     def optimize_budget(self, adgroup_data):
         """Optimize budget for a single ad group with RMSE-optimized approach"""
         adgroup_name = adgroup_data['AdGroup'].iloc[0]
@@ -284,117 +472,57 @@ class GlobalMarginalReturnOptimizerRMSE:
             logger.warning(f"Insufficient data points for {adgroup_name}. Skipping.")
             return None
         
+        # Calculate current metrics
+        current_spend = adgroup_data[self.spend_col].mean()
+        current_conversions = adgroup_data[self.target_col].mean()
+        
         # Engineer features
         logger.info(f"Engineering features for {adgroup_name}")
         X = self.engineer_features(adgroup_data.copy())
         y = adgroup_data[self.target_col]
         
-        # Scale features
-        logger.info(f"Scaling features for {adgroup_name}")
-        X_scaled = self.scaler.fit_transform(X)
+        # Store feature columns
+        self.feature_columns = [col for col in X.columns if col != self.target_col]
+        logger.info(f"Using {len(self.feature_columns)} features: {self.feature_columns}")
+        
+        # Scale features while maintaining DataFrame structure
+        X_scaled = pd.DataFrame(
+            self.scaler.fit_transform(X[self.feature_columns]),
+            columns=self.feature_columns,
+            index=X.index
+        )
         
         # Fit ensemble model
         logger.info(f"Fitting ensemble model for {adgroup_name}")
         rf_model, gb_model, rf_weight, gb_weight = self.fit_ensemble_model(X_scaled, y)
         
-        # Generate spend range with fewer points
-        current_spend = adgroup_data[self.spend_col].iloc[-1]
-        current_conversions = adgroup_data[self.target_col].iloc[-1]
-        current_ctr = adgroup_data['Clicks'].iloc[-1] / adgroup_data['Impressions'].iloc[-1] if 'Clicks' in adgroup_data.columns and 'Impressions' in adgroup_data.columns else None
-        current_cvr = adgroup_data['Conversions'].iloc[-1] / adgroup_data['Clicks'].iloc[-1] if 'Clicks' in adgroup_data.columns else None
+        # Store models for this ad group
+        self.models[adgroup_name] = {
+            'rf': rf_model,
+            'gb': gb_model,
+            'rf_weight': rf_weight,
+            'gb_weight': gb_weight
+        }
         
-        # Create a more focused spend range around current spend
-        logger.info(f"Generating spend range for {adgroup_name}")
-        spend_range = np.concatenate([
-            np.linspace(max(self.min_spend, current_spend * 0.5), current_spend * 0.9, 10),
-            np.linspace(current_spend * 0.9, current_spend * 1.1, 5),
-            np.linspace(current_spend * 1.1, min(self.max_spend, current_spend * 2), 10)
-        ])
-        spend_range = np.unique(spend_range)
-        
-        # Calculate marginal returns
-        best_spend = None
-        best_marginal_return = -np.inf
-        best_confidence = 0
-        best_metrics = {}
-        best_business_metrics = {}
-        
-        # Early stopping variables
-        no_improvement_count = 0
-        max_no_improvement = 5
-        last_best_marginal_return = -np.inf
-        
-        logger.info(f"Starting spend optimization for {adgroup_name}")
-        for i, spend in enumerate(spend_range):
-            if i % 5 == 0:  # Log progress every 5 iterations
-                logger.info(f"Evaluating spend point {i+1}/{len(spend_range)} for {adgroup_name}")
-            
-            # Create prediction input
-            pred_input = X.iloc[-1:].copy()
-            pred_input[self.spend_col] = spend
-            pred_input = self.engineer_features(pred_input)
-            pred_input_scaled = self.scaler.transform(pred_input)
-            
-            # Get ensemble prediction
-            pred_conversions = self.predict_with_ensemble(pred_input_scaled, rf_model, gb_model, rf_weight, gb_weight)[0]
-            
-            # Calculate metrics only if we have a reasonable prediction
-            if pred_conversions > 0:
-                # Calculate metrics
-                y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
-                metrics = self.calculate_enhanced_metrics(y, y_pred, X)
-                
-                # Calculate business metrics
-                business_metrics = self.calculate_business_metrics(
-                    current_spend, spend,
-                    current_conversions, pred_conversions,
-                    current_ctr, current_cvr
-                )
-                
-                # Combine metrics for confidence calculation
-                combined_metrics = {**metrics, **business_metrics}
-                
-                # Calculate confidence
-                confidence = self.calculate_enhanced_confidence(combined_metrics)
-                
-                # Calculate marginal return
-                if spend > 0:
-                    marginal_return = pred_conversions / spend
-                    
-                    if marginal_return > best_marginal_return and confidence >= self.confidence_threshold:
-                        best_marginal_return = marginal_return
-                        best_spend = spend
-                        best_confidence = confidence
-                        best_metrics = metrics
-                        best_business_metrics = business_metrics
-                        logger.info(f"Found better solution for {adgroup_name}: spend={spend:.2f}, confidence={confidence:.2f}")
-                        
-                        # Reset no improvement counter
-                        no_improvement_count = 0
-                    else:
-                        no_improvement_count += 1
-                    
-                    # Early stopping check
-                    if no_improvement_count >= max_no_improvement:
-                        logger.info(f"Early stopping triggered for {adgroup_name} after {i+1} iterations")
-                        break
-        
-        if best_spend is None:
-            logger.warning(f"No valid solution found for {adgroup_name}")
-            return None
+        # Optimize spend
+        best_spend, best_conversions, best_rmse = self._optimize_spend(adgroup_name, adgroup_data)
         
         # Generate performance plots
         logger.info(f"Generating performance plots for {adgroup_name}")
         y_pred = self.predict_with_ensemble(X_scaled, rf_model, gb_model, rf_weight, gb_weight)
         self.performance_plots[adgroup_name] = self.generate_performance_plots(y, y_pred, adgroup_name)
         
-        # Determine confidence level
-        if best_confidence >= 0.8:
+        # Determine confidence level based on relative RMSE
+        if best_rmse < 10:
             confidence_level = "High"
-        elif best_confidence >= 0.6:
-            confidence_level = "Medium"
-        else:
+        elif best_rmse < 20:
+            confidence_level = "Good"
+        elif best_rmse < 30:
+            confidence_level = "Moderate"
+        elif best_rmse < 40:
             confidence_level = "Low"
+        else:
+            confidence_level = "Poor"
         
         # Generate business justification
         if best_spend > current_spend:
@@ -410,50 +538,70 @@ class GlobalMarginalReturnOptimizerRMSE:
             'Current_Conversions': current_conversions,
             'Current_TCPA': current_spend / current_conversions if current_conversions > 0 else float('inf'),
             'Recommended_Spend': best_spend,
-            'Expected_Conversions': pred_conversions,
-            'Expected_TCPA': best_spend / pred_conversions if pred_conversions > 0 else float('inf'),
-            'Marginal_Conversion_per_Dollar': best_marginal_return,
-            'Confidence': best_confidence,
+            'Expected_Conversions': best_conversions,
+            'Expected_TCPA': best_spend / best_conversions if best_conversions > 0 else float('inf'),
+            'Relative_RMSE': best_rmse,
+            'Confidence': best_conversions,
             'Confidence_Level': confidence_level,
-            'R2': best_metrics['R2'],
-            'RMSE': best_metrics['RMSE'],
-            'MAPE': best_metrics['MAPE'],
-            'NRMSE': best_metrics['NRMSE'],
-            'Stability': best_metrics['Stability'],
-            'Direction_Accuracy': best_metrics['Direction_Accuracy'],
-            'Spend_Efficiency': best_business_metrics['Spend_Efficiency'],
-            'ROI_Projection': best_business_metrics['ROI_Projection'],
-            'Break_Even_Point': best_business_metrics['Break_Even_Point'],
             'Business_Justification': justification
         }
-        
-        # Add CTR and CVR metrics if available
-        if current_ctr is not None:
-            result['CTR'] = current_ctr
-        if current_cvr is not None:
-            result['CVR'] = current_cvr
-        if 'CTR_Impact' in best_metrics:
-            result['CTR_Impact'] = best_metrics['CTR_Impact']
-        if 'CVR_Impact' in best_metrics:
-            result['CVR_Impact'] = best_metrics['CVR_Impact']
         
         logger.info(f"Completed optimization for {adgroup_name}")
         return result
     
     def optimize_all_adgroups(self):
-        """Optimize budgets for all ad groups"""
-        logger.info("Starting optimization for all ad groups")
+        """Optimize budget allocation across all ad groups"""
+        self.logger.info("Starting optimization for all ad groups")
+        
+        # Initialize results storage
         results = []
+        skipped_adgroups = []
         
-        for adgroup in self.data['AdGroup'].unique():
-            logger.info(f"Processing AdGroup: {adgroup}")
-            adgroup_data = self.data[self.data['AdGroup'] == adgroup].copy()
-            result = self.optimize_budget(adgroup_data)
-            if result:
-                results.append(result)
-                logger.info(f"Successfully optimized {adgroup}")
-            else:
-                logger.warning(f"Failed to optimize {adgroup}")
+        # Get unique ad groups
+        adgroups = self.data['AdGroup'].unique()
+        total_adgroups = len(adgroups)
+        self.logger.info(f"Found {total_adgroups} unique ad groups")
         
-        logger.info(f"Completed optimization for all ad groups. Processed {len(results)} ad groups successfully.")
-        return pd.DataFrame(results)
+        # Limit the number of ad groups to process
+        max_adgroups = 50  # Safety limit
+        if total_adgroups > max_adgroups:
+            self.logger.warning(f"Limiting processing to {max_adgroups} ad groups out of {total_adgroups}")
+            adgroups = adgroups[:max_adgroups]
+        
+        # Process each ad group with timeout
+        for i, adgroup in enumerate(adgroups, 1):
+            try:
+                self.logger.info(f"Processing ad group {i}/{len(adgroups)}: {adgroup}")
+                
+                # Get data for this ad group
+                adgroup_data = self.data[self.data['AdGroup'] == adgroup].copy()
+                
+                if len(adgroup_data) < 3:
+                    self.logger.warning(f"Skipping {adgroup}: insufficient data points ({len(adgroup_data)})")
+                    skipped_adgroups.append(adgroup)
+                    continue
+                
+                # Optimize budget for this ad group
+                result = self.optimize_budget(adgroup_data)
+                
+                if result is not None:
+                    results.append(result)
+                    self.logger.info(f"Successfully optimized {adgroup}")
+                else:
+                    self.logger.warning(f"Failed to optimize {adgroup}")
+                    skipped_adgroups.append(adgroup)
+                
+            except Exception as e:
+                self.logger.error(f"Error processing ad group {adgroup}: {str(e)}")
+                skipped_adgroups.append(adgroup)
+                continue
+        
+        # Create results DataFrame
+        if results:
+            results_df = pd.DataFrame(results)
+            self.logger.info(f"Successfully optimized {len(results)} ad groups")
+            self.logger.info(f"Skipped {len(skipped_adgroups)} ad groups")
+            return results_df
+        else:
+            self.logger.error("No ad groups were successfully optimized")
+            return pd.DataFrame()

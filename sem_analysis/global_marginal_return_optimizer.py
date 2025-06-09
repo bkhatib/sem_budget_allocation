@@ -95,13 +95,6 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
             'CTR': ctr,
             'CVR': cvr,
             'RMSE': rmse,
-            'RMSE_Category': (
-                'Excellent' if rmse <= 1 else
-                'Good' if rmse <= 3 else
-                'Moderate' if rmse <= 6 else
-                'Low' if rmse <= 10 else
-                'Poor'
-            ),
         })
         adgroup_indices.append(idx)
     
@@ -183,7 +176,6 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         out_df['Marginal_Conversion_per_Dollar'] = marginal_returns
         out_df['Confidence'] = params_df['R2']
         out_df['RMSE'] = params_df['RMSE']
-        out_df['RMSE_Category'] = params_df['RMSE_Category']
         
         # Add confidence level column
         def get_confidence_level(r2):
@@ -246,7 +238,7 @@ def global_marginal_return_optimizer(df, total_budget=WEEKLY_BUDGET):
         # Reorder columns for clarity
         out_df = out_df[['AdGroup_Index','AdGroup','Current_Spend','Current_Conversions','Current_TCPA',
                          'Recommended_Spend','Expected_Conversions','Expected_TCPA',
-                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','Business_Justification','RMSE','RMSE_Category']]
+                         'Marginal_Conversion_per_Dollar','Confidence','Confidence_Level','Business_Justification','RMSE']]
         
         logger.info("Optimization complete. Returning results.")
         return out_df, adgroup_rmses

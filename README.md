@@ -1,59 +1,67 @@
-# SEM Budget Optimization Tool
+# SEM Budget Optimization Dashboard
 
-A Python-based tool for optimizing Search Engine Marketing (SEM) budget allocation across different ad groups. This tool uses statistical modeling and optimization techniques to recommend optimal budget distribution while maximizing conversions.
+A powerful dashboard for optimizing Search Engine Marketing (SEM) budget allocation across different ad groups using advanced statistical models.
 
 ## Features
 
-- Interactive dashboard for budget optimization visualization
-- Statistical modeling of conversion response curves
-- Marginal return optimization
-- Detailed business justifications for budget recommendations
-- Export capabilities for results and visualizations
+- **Global Marginal Return Model**: Optimizes budget allocation using logarithmic regression
+- **Multi-Factor Model**: Advanced optimization considering multiple variables (spend, CTR, CVR)
+- **Interactive Dashboard**: Visualize and analyze optimization results
+- **Detailed Metrics**: Comprehensive performance indicators and business justifications
+- **Export Capabilities**: Download results and response curves
 
 ## Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/bkhatib/sem_budget_allocation.git
+git clone https://github.com/yourusername/sem_budget_allocation.git
 cd sem_budget_allocation
 ```
 
-2. Install the required dependencies:
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-1. Place your SEM data in CSV format in the `sem_analysis` directory with the name `SEM_DATA_TOP100.csv`
-
-2. Run the Streamlit dashboard:
+1. Run the dashboard:
 ```bash
-streamlit run sem_analysis/app.py
+cd sem_analysis
+streamlit run app.py
 ```
 
-3. Access the dashboard in your web browser (typically at http://localhost:8501)
+2. Upload your SEM data CSV file or use the default dataset
+3. Select your preferred model type
+4. Adjust the total budget as needed
+5. View and analyze the optimization results
 
-## Dashboard Features
-
-- Adjustable total budget through interactive controls
-- Summary metrics showing key performance indicators
-- Interactive budget allocation comparison charts
-- TCPA comparison visualizations
-- Detailed results table with formatted numbers
-- Expandable business justifications for each ad group
-- Download options for results and response curves
-
-## Data Requirements
+## Data Format
 
 The input CSV file should contain the following columns:
 - AdGroup: Name of the ad group
-- Spend: Weekly spend amount
-- Conversions: Number of conversions
-- Impressions: Number of impressions
-- Clicks: Number of clicks
 - week_start: Start date of the week
+- Spend: Amount spent
+- Conversions: Number of conversions
+- Clicks: Number of clicks
+- Impressions: Number of impressions
+
+## Models
+
+### Global Marginal Return Model
+- Uses logarithmic function to model spend vs. conversions
+- Optimizes based on marginal returns
+- Best for basic budget allocation
+
+### Multi-Factor Model
+- Considers multiple variables affecting conversions
+- More sophisticated optimization approach
+- Better for complex scenarios
 
 ## License
 
-MIT License 
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. 
