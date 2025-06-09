@@ -73,6 +73,42 @@ total_budget = st.sidebar.number_input(
     step=1000
 )
 
+# Add RMSE-optimized model parameters
+if model_type == "RMSE-Optimized Model":
+    st.sidebar.subheader("RMSE-Optimized Model Parameters")
+    min_spend = st.sidebar.number_input(
+        "Minimum Spend ($)",
+        min_value=0.1,
+        max_value=1000,
+        value=0.1,
+        step=0.1,
+        help="Minimum spend per ad group"
+    )
+    max_spend = st.sidebar.number_input(
+        "Maximum Spend ($)",
+        min_value=1000,
+        max_value=100000,
+        value=1000,
+        step=100,
+        help="Maximum spend per ad group"
+    )
+    step = st.sidebar.number_input(
+        "Optimization Step Size ($)",
+        min_value=0.1,
+        max_value=100,
+        value=0.1,
+        step=0.1,
+        help="Step size for optimization"
+    )
+    confidence_threshold = st.sidebar.slider(
+        "Confidence Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.7,
+        step=0.05,
+        help="Minimum confidence level for recommendations"
+    )
+
 # Load and process data
 @st.cache_data
 def load_data(uploaded_file=None):
